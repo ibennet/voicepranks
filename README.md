@@ -1,2 +1,72 @@
-# voicepranks
-# voicepranks
+# voicepranks — Minion Voice Changer
+
+Real-time "Minion voice" microphone filter for macOS and Windows, written in
+pure Python (numpy + sounddevice, hand-rolled DSP — no scipy/librosa).
+
+It captures your physical microphone, pitch-shifts it up (chipmunk-style,
+formants move up too) with a presence-EQ boost that ramps in over ~1.2s, and
+routes the result to a virtual audio device so apps like Discord, Zoom, or
+OBS can pick it up as their microphone input.
+
+## How it works
+
+```
+physical mic -> capture -> pitch shift up + presence EQ (ramped in) -> virtual output device
+```
+
+The virtual device is [VB-CABLE](https://vb-audio.com/Cable/) ("CABLE Input")
+on Windows, or [BlackHole](https://existential.audio/blackhole/) on macOS.
+Install one of those first, then point your voice/video app's microphone
+input at it.
+
+## Requirements
+
+- Python 3.9+
+- `numpy`, `sounddevice` (see `requirements.txt`)
+- A virtual audio cable driver (VB-CABLE on Windows, BlackHole on macOS)
+
+## Install
+
+```
+python -m venv .venv
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+```
+
+## Run the GUI
+
+```
+python -m minion_voice
+```
+
+Toggle the effect on/off, drag the intensity slider, and pick your input
+device and the detected virtual output device.
+
+## Audition the effect with no audio hardware
+
+`selftest.py` reads/writes WAV files directly, so you can hear the effect
+without any mic or virtual cable set up:
+
+```
+python -m minion_voice.selftest out.wav
+python -m minion_voice.selftest in.wav out.wav --semitones 8 --eq-db 8
+```
+
+If no input WAV is given, a 2-second synthetic test tone (200 Hz with a
+little vibrato) is generated and processed instead.
+
+## Run the tests
+
+```
+pytest -q
+```
+
+## Project layout
+
+```
+minion_voice/
+  dsp/        pitch shifting, peaking EQ, intensity ramp, combined effect
+  audio/      device discovery + the real-time capture/output engine
+  ui/         tkinter GUI
+  selftest.py CLI WAV-file audition tool
+```
