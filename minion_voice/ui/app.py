@@ -1,6 +1,7 @@
 """Minimal tkinter GUI for the Minion Voice engine."""
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Optional, Tuple
@@ -161,7 +162,23 @@ class MinionVoiceApp:
         self.root.after(STATUS_REFRESH_MS, self._refresh_status)
 
 
+def _warn_if_broken_tk() -> None:
+    """Apple's system-Python Tk (8.5) renders blank/broken windows on modern
+    macOS. Warn loudly with the fix instead of leaving the user staring at an
+    empty window."""
+    if tk.TkVersion < 8.6:
+        sys.stderr.write(
+            "\n[minion_voice] WARNING: this Python is using Tk "
+            f"{tk.TkVersion}, which renders blank windows on modern macOS.\n"
+            "  Fix: install a Python with a newer Tk, e.g.\n"
+            "    brew install python-tk\n"
+            "  then recreate your venv with that Python "
+            "(/opt/homebrew/bin/python3).\n\n"
+        )
+
+
 def run() -> None:
+    _warn_if_broken_tk()
     root = tk.Tk()
     MinionVoiceApp(root)
     root.mainloop()

@@ -55,6 +55,25 @@ python -m minion_voice.selftest in.wav out.wav --semitones 8 --eq-db 8
 If no input WAV is given, a 2-second synthetic test tone (200 Hz with a
 little vibrato) is generated and processed instead.
 
+## Troubleshooting
+
+**Blank / empty window on macOS.** Apple's *system* Python (`/usr/bin/python3`)
+ships with Tk 8.5, which renders blank windows on modern macOS. Use a Python
+built against a newer Tk:
+
+```
+brew install python-tk
+python3 -m venv .venv          # uses Homebrew's python3 (Tk 8.6+/9.0)
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+The app prints a warning at startup if it detects a broken Tk.
+
+**BlackHole not detected right after installing it.** macOS only scans for
+audio drivers when `coreaudiod` starts, so a fresh install may be invisible
+until you restart the audio daemon (`sudo killall coreaudiod`) or reboot.
+
 ## Run the tests
 
 ```
