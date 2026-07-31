@@ -1,4 +1,13 @@
-"""Combines pitch shift + presence EQ into the "Minion" voice effect."""
+"""The "Minion" voice effect: pitch shift only (flat, no EQ).
+
+An EQ presence-boost stage was previously stacked on top of the pitch
+shift, but chosen-by-ear testing showed the pitch shift alone reads as
+correct/desired, and the EQ boost was not needed (and slightly hurt) once
+the pitch shifter itself changed to WSOLA. The EQ stage (`PeakingEQ` in
+`biquad.py`) is left intact and wired up (but at 0 dB / unused in the
+process chain) so it can be re-enabled later without touching
+`engine.py`/`ui/app.py`.
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -8,10 +17,10 @@ from .pitch import PitchShifter
 
 
 class MinionEffect:
-    """Pitch-shift-up + presence-EQ-boost voice effect, driven by intensity."""
+    """Pitch-shift-up voice effect, driven by intensity. Flat (no EQ)."""
 
     MAX_SEMITONES = 8.5
-    MAX_EQ_GAIN_DB = 8.0
+    MAX_EQ_GAIN_DB = 0.0
     EQ_CENTER_HZ = 2000.0
 
     def __init__(self, sample_rate: int, channels: int = 1) -> None:
@@ -34,6 +43,4 @@ class MinionEffect:
         self.eq.reset()
 
     def process(self, mono: np.ndarray) -> np.ndarray:
-        shifted = self.pitch.process(mono)
-        eq_out = self.eq.process(shifted)
-        return eq_out.astype(np.float32)
+        return self.pitch.process(mono)
