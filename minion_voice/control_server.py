@@ -22,9 +22,9 @@ Endpoints (all JSON in/out unless noted):
     POST /api/record/start
     POST /api/record/stop           -> {ok, take_seconds}
     POST /api/render                -> {ok, take_seconds}
-    POST /api/play                  {"which": "raw"|"rendered"}
-    POST /api/save                  {"path": ..., "which": "raw"|"rendered"}
-    GET  /api/recording.wav?which=raw|rendered  -> audio/wav bytes
+    POST /api/play                  {"which": "live"|"raw"|"rendered"}
+    POST /api/save                  {"path": ..., "which": "live"|"raw"|"rendered"}
+    GET  /api/recording.wav?which=live|raw|rendered  -> audio/wav bytes
     GET  /                          -> minimal read-only status page
 """
 from __future__ import annotations
@@ -102,7 +102,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/api/devices":
                 self._handle_devices_get()
             elif path == "/api/recording.wav":
-                which = (query.get("which") or ["rendered"])[0]
+                which = (query.get("which") or ["live"])[0]
                 self._handle_recording_wav(which)
             else:
                 self._send_error_json(HTTPStatus.NOT_FOUND, f"no such route: {path}")
@@ -133,7 +133,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "status": self.engine.get_status()})
             elif path == "/api/play":
                 body = self._read_json_body()
-                self.engine.play(body.get("which", "rendered"))
+                self.engine.play(body.get("which", "live"))
                 self._send_json({"ok": True})
             elif path == "/api/save":
                 body = self._read_json_body()
@@ -141,7 +141,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if not path_arg:
                     self._send_error_json(HTTPStatus.BAD_REQUEST, "missing 'path'")
                     return
-                self.engine.save(path_arg, body.get("which", "rendered"))
+                self.engine.save(path_arg, body.get("which", "live"))
                 self._send_json({"ok": True, "path": path_arg})
             else:
                 self._send_error_json(HTTPStatus.NOT_FOUND, f"no such route: {path}")

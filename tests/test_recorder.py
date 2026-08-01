@@ -30,25 +30,47 @@ def _feed_dry_take(engine: VoiceEngine, signal: np.ndarray, block: int = BLOCK) 
         engine._input_callback(chunk.reshape(-1, 1), block, None, None)
 
 
-def test_record_start_stop_captures_dry_take():
+def test_record_stop_returns_live_take_equal_to_dry_when_effect_off():
     engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
     signal = _gen_sine(220.0, 1.0)
 
     engine.record_start()
     assert engine.get_status()["recording"] is True
     _feed_dry_take(engine, signal)
-    raw = engine.record_stop()
+    live = engine.record_stop()
 
     assert engine.get_status()["recording"] is False
-    assert raw.shape[0] >= signal.shape[0]
-    assert not np.any(np.isnan(raw))
-    assert not np.any(np.isinf(raw))
-    # The captured take should be the *dry* mic signal, not run through
-    # the effect -- close to the padded input regardless of `enabled`.
-    assert np.allclose(raw[: signal.shape[0]], signal, atol=1e-6)
+    assert engine.get_status()["has_live_take"] is True
+    assert not np.any(np.isnan(live))
+    assert not np.any(np.isinf(live))
+    # Effect off -> processed == dry passthrough, so the live take is the
+    # (padded) input verbatim.
+    assert np.allclose(live[: signal.shape[0]], signal, atol=1e-6)
 
 
-def test_recording_captures_dry_signal_even_when_effect_enabled():
+def test_live_take_is_the_processed_output_when_effect_enabled():
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.set_param("enabled", True)
+    engine.set_param("effect.max_semitones", 12.0)
+    engine.set_param("intensity", 1.0)
+
+    signal = _gen_sine(220.0, 1.0)
+    engine.record_start()
+    _feed_dry_take(engine, signal)
+    live = engine.record_stop()
+
+    assert not np.any(np.isnan(live))
+    assert live.shape[0] > 0
+    # The live take is the real-time effect output -> pitched up, clearly
+    # different from the dry input.
+    windowed = live * np.hanning(len(live))
+    spectrum = np.fft.rfft(windowed)
+    freqs = np.fft.rfftfreq(len(live), d=1.0 / SAMPLE_RATE)
+    dominant = float(freqs[np.argmax(np.abs(spectrum))])
+    assert dominant > 220.0 * 1.3, f"expected a pitched-up live take, got {dominant} Hz"
+
+
+def test_dry_raw_take_is_still_captured_independently():
     engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
     engine.set_param("enabled", True)
     engine.set_param("intensity", 1.0)
@@ -56,11 +78,10 @@ def test_recording_captures_dry_signal_even_when_effect_enabled():
     signal = _gen_sine(220.0, 0.5)
     engine.record_start()
     _feed_dry_take(engine, signal)
-    raw = engine.record_stop()
+    engine.record_stop()
 
-    assert not np.any(np.isnan(raw))
-    # Dry take should still closely match the original signal, since
-    # recording happens before the pitch-shift effect is applied.
+    # The dry take is kept for optional re-render, unaffected by the effect.
+    raw = engine._get_take("raw")
     assert np.allclose(raw[: signal.shape[0]], signal, atol=1e-6)
 
 
@@ -113,6 +134,14 @@ def test_save_and_play_use_the_requested_take(tmp_path, monkeypatch):
         played["sample_rate"] = sample_rate
 
     monkeypatch.setattr("minion_voice.audio.engine.sd.play", fake_play)
-    engine.play("raw")
+
+    # Default play() targets the live processed take.
+    engine.play()
+    live_buf = played["buf"]
     assert played["sample_rate"] == SAMPLE_RATE
-    assert not np.any(np.isnan(played["buf"]))
+    assert not np.any(np.isnan(live_buf))
+    np.testing.assert_array_equal(live_buf, engine._get_take("live"))
+
+    # Explicit takes still selectable.
+    engine.play("raw")
+    np.testing.assert_array_equal(played["buf"], engine._get_take("raw"))

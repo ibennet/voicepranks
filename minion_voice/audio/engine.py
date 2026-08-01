@@ -137,11 +137,20 @@ class VoiceEngine:
         self._proc_rms = 0.0
         self._proc_peak = 0.0
 
-        # -- recorder: raw (dry) take + last render ------------------------
+        # -- recorder ------------------------------------------------------
+        # Two takes are captured per recording:
+        #  - "live": the processed effect output, captured block-by-block as
+        #    it is generated in real time (what you'd have heard live). Play
+        #    replays this verbatim -- no re-render, nothing re-applied.
+        #  - "raw": the dry (pre-effect) mic signal, kept so the effect can
+        #    be re-rendered onto the same take with tweaked params (the A/B
+        #    tuning flow). Optional; the primary flow is the live take.
         self._record_lock = threading.Lock()
         self._recording = False
         self._raw_chunks: List[np.ndarray] = []
         self._raw_take: Optional[np.ndarray] = None
+        self._live_chunks: List[np.ndarray] = []
+        self._live_take: Optional[np.ndarray] = None
         self._rendered_take: Optional[np.ndarray] = None
 
     # -- param registry (shared by Tkinter UI + HTTP control server) -----
@@ -465,6 +474,7 @@ class VoiceEngine:
             "last_error": self.last_error,
             "recording": self._recording,
             "take_seconds": self._current_take_seconds(),
+            "has_live_take": self._live_take is not None and self._live_take.size > 0,
             "has_raw_take": self._raw_take is not None and self._raw_take.size > 0,
             "has_rendered_take": self._rendered_take is not None and self._rendered_take.size > 0,
             "level": {
@@ -478,22 +488,30 @@ class VoiceEngine:
     # -- recorder --------------------------------------------------------
 
     def record_start(self) -> None:
-        """Begin appending the dry (pre-effect) mic signal to a new take."""
+        """Begin a new take: capture the live processed output (and the dry
+        mic for optional re-render)."""
         with self._record_lock:
             self._raw_chunks = []
             self._raw_take = None
+            self._live_chunks = []
+            self._live_take = None
             self._rendered_take = None
             self._recording = True
 
     def record_stop(self) -> np.ndarray:
-        """Stop recording and return the concatenated raw take."""
+        """Stop recording; finalize both takes and return the live processed
+        take (what Play replays)."""
         with self._record_lock:
             self._recording = False
             self._raw_take = (
                 np.concatenate(self._raw_chunks) if self._raw_chunks else np.zeros(0, dtype=np.float32)
             )
+            self._live_take = (
+                np.concatenate(self._live_chunks) if self._live_chunks else np.zeros(0, dtype=np.float32)
+            )
             self._raw_chunks = []
-        return self._raw_take
+            self._live_chunks = []
+        return self._live_take
 
     def _current_take_seconds(self) -> float:
         with self._record_lock:
@@ -529,25 +547,27 @@ class VoiceEngine:
         return out
 
     def _get_take(self, which: str) -> np.ndarray:
-        if which == "raw":
+        if which == "live":
+            buf = self._live_take
+        elif which == "raw":
             buf = self._raw_take
         elif which == "rendered":
             buf = self._rendered_take
         else:
-            raise ValueError(f"unknown take '{which}' (expected 'raw' or 'rendered')")
+            raise ValueError(f"unknown take '{which}' (expected 'live', 'raw' or 'rendered')")
         if buf is None or buf.size == 0:
             raise RuntimeError(f"no {which} take available")
         return buf
 
-    def play(self, which: str = "rendered") -> None:
+    def play(self, which: str = "live") -> None:
         buf = self._get_take(which)
         sd.play(buf, self.sample_rate, device=self.output_device)
 
-    def save(self, path: str, which: str = "rendered") -> None:
+    def save(self, path: str, which: str = "live") -> None:
         buf = self._get_take(which)
         wavio.write_wav(path, self.sample_rate, buf)
 
-    def take_bytes(self, which: str = "rendered") -> bytes:
+    def take_bytes(self, which: str = "live") -> bytes:
         buf = self._get_take(which)
         return wavio.wav_bytes(self.sample_rate, buf)
 
@@ -559,11 +579,6 @@ class VoiceEngine:
 
             mono = indata[:, 0] if indata.ndim > 1 else indata
             mono = np.asarray(mono, dtype=np.float32)
-
-            if self._recording:
-                with self._record_lock:
-                    if self._recording:
-                        self._raw_chunks.append(mono.copy())
 
             if mono.size:
                 dry64 = mono.astype(np.float64)
@@ -579,6 +594,18 @@ class VoiceEngine:
                 processed = self.effect.process(mono)
             else:
                 processed = mono
+
+            # Capture both takes under one lock: the live processed output
+            # (the real-time effect result, replayed verbatim by Play) and
+            # the dry mic (for optional re-render). The effect emits a
+            # variable number of samples per block, so the live take is the
+            # concatenation of exactly what went out.
+            if self._recording:
+                with self._record_lock:
+                    if self._recording:
+                        self._raw_chunks.append(mono.copy())
+                        if processed.size:
+                            self._live_chunks.append(np.asarray(processed, dtype=np.float32).copy())
 
             if processed.size:
                 proc64 = processed.astype(np.float64)

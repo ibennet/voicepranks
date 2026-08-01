@@ -119,14 +119,16 @@ class MinionVoiceApp:
         rec_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         ttk.Button(rec_frame, text="Record", command=self._on_record).pack(side="left", padx=(0, 4))
         ttk.Button(rec_frame, text="Stop", command=self._on_record_stop).pack(side="left", padx=4)
+        # Primary flow: Play replays the live processed take verbatim (the
+        # effect as it was applied in real time -- no re-render).
+        ttk.Button(rec_frame, text="Play", command=self._on_play).pack(side="left", padx=4)
+        # Secondary A/B flow: re-render the dry take with current params.
         ttk.Button(rec_frame, text="Re-render & Play", command=self._on_rerender_play).pack(side="left", padx=4)
-        ttk.Button(rec_frame, text="Play Raw", command=self._on_play_raw).pack(side="left", padx=4)
 
-        # Live monitor: hear the processed effect on your speakers while
-        # recording, so you can judge the real-time sound (including the
-        # shuffle engine's latency) instead of only the offline re-render.
-        # Bound to the same `monitor` param as the API, hence skipped from
-        # the generated grid (see `_SKIP_PARAM_NAMES`).
+        # Live monitor: also hear the processed effect on your speakers while
+        # recording. Off by default -- Record works without it. Bound to the
+        # same `monitor` param as the API, hence skipped from the generated
+        # grid (see `_SKIP_PARAM_NAMES`).
         self.monitor_var = tk.BooleanVar(value=self.engine.monitor_enabled)
         ttk.Checkbutton(
             rec_frame,
@@ -330,18 +332,20 @@ class MinionVoiceApp:
     def _on_monitor_toggle(self) -> None:
         self.engine.set_param("monitor", self.monitor_var.get())
 
+    def _on_play(self) -> None:
+        # Replay the live processed take exactly as it was captured -- no
+        # re-render, no params re-applied.
+        try:
+            self.engine.play("live")
+        except Exception as exc:
+            self.error_message = f"Play failed: {exc}"
+
     def _on_rerender_play(self) -> None:
         try:
             self.engine.render_current()
             self.engine.play("rendered")
         except Exception as exc:
             self.error_message = f"Re-render/play failed: {exc}"
-
-    def _on_play_raw(self) -> None:
-        try:
-            self.engine.play("raw")
-        except Exception as exc:
-            self.error_message = f"Play raw failed: {exc}"
 
     # -- status polling ------------------------------------------------
 
@@ -389,6 +393,7 @@ class MinionVoiceApp:
             f"Level  dry: {level.get('dry_rms', 0.0):.3f} rms / {level.get('dry_peak', 0.0):.3f} pk   "
             f"out: {level.get('processed_rms', 0.0):.3f} rms / {level.get('processed_peak', 0.0):.3f} pk\n"
             f"Take: {take_state}, {status.get('take_seconds', 0.0):.1f}s   "
+            f"live={'yes' if status.get('has_live_take') else 'no'}   "
             f"raw={'yes' if status.get('has_raw_take') else 'no'}   "
             f"rendered={'yes' if status.get('has_rendered_take') else 'no'}"
             f"{error_suffix}"

@@ -43,10 +43,12 @@ Toggle the effect on/off, pick your input device and the detected virtual
 output device, and tune every DSP knob (pitch amount, EQ, Minionese
 gibberish-mode params, WSOLA pitch-engine internals, I/O) from a scrollable
 grid of sliders/checkboxes -- one control per entry in `params.PARAM_SPECS`,
-so nothing is hidden behind a hardcoded module constant anymore. Record a
-take, then use **Re-render & Play** to A/B the same recording against
-whatever settings are currently dialed in, or **Play Raw** to hear the
-unprocessed take.
+so nothing is hidden behind a hardcoded module constant anymore. Hit
+**Record** and the effect runs in real time while it captures the processed
+output; **Play** replays that live take verbatim (no re-render). Tick **Live
+monitor** to also hear it on your speakers while recording. **Re-render &
+Play** is a secondary A/B flow: it re-runs the *dry* mic through a fresh
+effect with whatever settings are currently dialed in.
 
 The GUI also starts a small local HTTP control API by default (see below),
 so the same params can be tuned live from the command line or a script
@@ -81,12 +83,12 @@ Endpoints (JSON in/out unless noted):
 | POST | `/api/engine/toggle` | | Start if needed, then flip the effect on/off |
 | GET | `/api/devices` | | List input/output devices |
 | POST | `/api/devices` | `{input_device?, output_device?}` | Switch devices (restarts streams if running) |
-| POST | `/api/record/start` | | Start recording the dry (pre-effect) mic signal |
+| POST | `/api/record/start` | | Start recording (captures the live processed output + the dry mic) |
 | POST | `/api/record/stop` | | Stop recording |
-| POST | `/api/render` | | Re-render the last raw take with the *current* params |
-| POST | `/api/play` | `{"which": "raw"\|"rendered"}` | Play a take through the output device |
-| POST | `/api/save` | `{"path": ..., "which": "raw"\|"rendered"}` | Save a take to a WAV file |
-| GET | `/api/recording.wav?which=raw\|rendered` | | Download a take as WAV bytes |
+| POST | `/api/render` | | Re-render the dry take with the *current* params (A/B flow) |
+| POST | `/api/play` | `{"which": "live"\|"raw"\|"rendered"}` | Play a take (default `live`) through the output device |
+| POST | `/api/save` | `{"path": ..., "which": "live"\|"raw"\|"rendered"}` | Save a take to a WAV file |
+| GET | `/api/recording.wav?which=live\|raw\|rendered` | | Download a take as WAV bytes |
 | GET | `/` | | Minimal read-only status/params page |
 
 Example tuning loop:
@@ -97,19 +99,26 @@ curl -s -XPOST localhost:8765/api/params -d '{"minionese.semitones": 6.5}'
 curl -s -XPOST localhost:8765/api/record/start
 # ...speak...
 curl -s -XPOST localhost:8765/api/record/stop
-curl -s -XPOST localhost:8765/api/render
-curl -s -XPOST localhost:8765/api/play -d '{"which": "rendered"}'
+curl -s -XPOST localhost:8765/api/play          # plays the live processed take
 ```
 
-## Record, re-render, and playback
+## Record and playback
 
-Both the GUI and the API record the **dry** mic signal (before any effect is
-applied) as a "raw take", then let you **re-render** it through a fresh
-copy of the effect configured from whatever params are dialed in right now
--- so you can A/B the same recording across different settings without
-re-recording, and without disturbing the live engine's own state. `play()`
-plays a take (`raw` or `rendered`) through the selected output device;
-`save()`/`GET /api/recording.wav` write it out as a 16-bit PCM WAV.
+Recording captures two takes at once:
+
+- **live** — the processed effect output, captured block-by-block exactly as
+  it is produced in real time. `play()` replays this verbatim; nothing is
+  re-rendered or re-applied, so it's a faithful "as it sounded live" capture.
+  This is the default take for `play`/`save`/`recording.wav`.
+- **raw** — the dry (pre-effect) mic signal, kept so the effect can be
+  **re-rendered** onto the same take with different params (`/api/render` →
+  the `rendered` take), an optional A/B tuning flow that doesn't disturb the
+  live engine's own state.
+
+`play()` plays a take (`live`, `raw`, or `rendered`) through the selected
+output device; `save()`/`GET /api/recording.wav` write it out as a 16-bit PCM
+WAV. Tick **Live monitor** (or `POST /api/params {"monitor": true}`) to also
+hear the processed audio on your speakers while recording.
 
 ## Audition the effect with no audio hardware
 
