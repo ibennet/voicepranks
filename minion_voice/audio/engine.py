@@ -156,6 +156,9 @@ class VoiceEngine:
         """Override the auto-ramp with a fixed intensity (e.g. slider drag)."""
         self._manual_intensity = min(max(float(t), 0.0), 1.0)
 
+    def set_gibberish(self, b: bool) -> None:
+        self.effect.set_gibberish(b)
+
     def get_status(self) -> dict:
         return {
             "intensity": self.effect.intensity,

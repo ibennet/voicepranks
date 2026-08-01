@@ -48,18 +48,27 @@ class MinionVoiceApp:
         )
         self.intensity_slider.grid(row=1, column=1, sticky="ew", pady=4)
 
-        ttk.Label(frame, text="Input device").grid(row=2, column=0, sticky="w")
+        self.gibberish_var = tk.BooleanVar(value=False)
+        self.gibberish_check = ttk.Checkbutton(
+            frame,
+            text="Minionese (gibberish)",
+            variable=self.gibberish_var,
+            command=self._on_gibberish_toggle,
+        )
+        self.gibberish_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        ttk.Label(frame, text="Input device").grid(row=3, column=0, sticky="w")
         self.input_var = tk.StringVar()
         self.input_combo = ttk.Combobox(frame, textvariable=self.input_var, state="readonly")
-        self.input_combo.grid(row=2, column=1, sticky="ew", pady=4)
+        self.input_combo.grid(row=3, column=1, sticky="ew", pady=4)
 
-        ttk.Label(frame, text="Output device").grid(row=3, column=0, sticky="w")
+        ttk.Label(frame, text="Output device").grid(row=4, column=0, sticky="w")
         self.output_var = tk.StringVar()
         self.output_combo = ttk.Combobox(frame, textvariable=self.output_var, state="readonly")
-        self.output_combo.grid(row=3, column=1, sticky="ew", pady=4)
+        self.output_combo.grid(row=4, column=1, sticky="ew", pady=4)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         frame.columnconfigure(1, weight=1)
 
@@ -145,6 +154,9 @@ class MinionVoiceApp:
         self._slider_dragging = True
         t = self.intensity_var.get() / 100.0
         self.engine.set_manual_intensity(t)
+
+    def _on_gibberish_toggle(self) -> None:
+        self.engine.set_gibberish(self.gibberish_var.get())
 
     # -- status polling ------------------------------------------------
 
