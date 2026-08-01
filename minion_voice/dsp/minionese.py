@@ -273,14 +273,24 @@ class Minionese:
         self.win = np.hanning(self.N).astype(np.float64)
         self.freqs = np.fft.rfftfreq(self.N, 1.0 / self.sample_rate)
 
-        self.SYLL = max(1, int(SYLL_MS / 1000.0 * self.sample_rate))
+        # Instance copies of the module-level "C1" defaults so a single
+        # Minionese instance can be tuned live without touching the
+        # module constants (kept as defaults read here at construction).
+        self.semitones = SEMITONES
+        self.wobble_ms = VIB_MS
+        self.chunk_ms = SYLL_MS
+        self.shuffle_k = 5  # number of vowel candidates (len(VOW))
+        self.fade_ms = ATK * SYLL_MS  # syllable attack/release time, ms
+        self.max_slew = MAX_SLEW
+
+        self.SYLL = max(1, int(self.chunk_ms / 1000.0 * self.sample_rate))
         self.dur = self.SYLL / self.sample_rate
         self._vad_kv = max(1, int(VAD_SMOOTH_MS / 1000.0 * self.sample_rate / self.hop))
 
         self._seed = seed
         self._pitch = PitchShifter(self.sample_rate)
-        self._pitch.set_semitones(SEMITONES)
-        self._vibrato = _VibratoDelay(self.sample_rate, VIB_MS, VIB_HZ)
+        self._pitch.set_semitones(self.semitones)
+        self._vibrato = _VibratoDelay(self.sample_rate, self.wobble_ms, VIB_HZ)
 
         self.intensity = 1.0
 
@@ -290,6 +300,43 @@ class Minionese:
 
     def set_intensity(self, t: float) -> None:
         self.intensity = min(max(float(t), 0.0), 1.0)
+
+    def set_semitones(self, semitones: float) -> None:
+        """Live-adjustable pitch-up amount; no rebuild needed."""
+        self.semitones = float(semitones)
+        self._pitch.set_semitones(self.semitones)
+
+    def set_wobble_ms(self, wobble_ms: float) -> None:
+        """Vibrato depth (ms). Rebuilds the vibrato delay stage (small
+        reset -- a few ms of latency change, inaudible as a click)."""
+        self.wobble_ms = float(wobble_ms)
+        self._vibrato = _VibratoDelay(self.sample_rate, self.wobble_ms, VIB_HZ)
+
+    def set_chunk_ms(self, chunk_ms: float) -> None:
+        """Syllable duration (ms). Rebuilds the sequencer's chunking, so
+        the whole streaming pipeline state is reset."""
+        self.chunk_ms = float(chunk_ms)
+        self.SYLL = max(1, int(self.chunk_ms / 1000.0 * self.sample_rate))
+        self.dur = self.SYLL / self.sample_rate
+        self._init_state()
+
+    def set_shuffle_k(self, k: int) -> None:
+        """Number of candidate vowels the sequencer shuffles between.
+        Rebuilds sequencer state (reset)."""
+        self.shuffle_k = max(2, int(k))
+        self._init_state()
+
+    def set_fade_ms(self, fade_ms: float) -> None:
+        """Syllable attack/release time (ms), converted internally to the
+        `gate` envelope's attack/release fraction of the syllable
+        duration. Rebuilds sequencer state (reset) for parity with the
+        other syllable-timing params."""
+        self.fade_ms = float(fade_ms)
+        self._init_state()
+
+    def set_max_slew(self, max_slew: float) -> None:
+        """Output slew-rate ceiling; no rebuild needed."""
+        self.max_slew = float(max_slew)
 
     def reset(self) -> None:
         self._pitch.reset()
@@ -326,7 +373,8 @@ class Minionese:
 
         # Sequencer state.
         self._seq_t = 0
-        self._seq_prevv = int(self._rng.integers(5))
+        self._vowel_pool = min(max(int(self.shuffle_k), 2), len(VOW))
+        self._seq_prevv = int(self._rng.integers(self._vowel_pool))
         self._have_onset = False
         self._onset_t = 0
         self._vw_cur = 0
@@ -384,9 +432,9 @@ class Minionese:
             if not self._speak_at(self._seq_t):
                 self._seq_t += self.hop
                 continue
-            v = int(self._rng.integers(5))
+            v = int(self._rng.integers(self._vowel_pool))
             while v == self._seq_prevv:
-                v = int(self._rng.integers(5))
+                v = int(self._rng.integers(self._vowel_pool))
             nasal = bool(self._rng.random() < NASAL_FRAC)
 
             if not self._have_onset:
@@ -426,7 +474,8 @@ class Minionese:
             self._out_ow[: self.N] += self.win ** 2
             return
 
-        gate = FLOOR + (1.0 - FLOOR) * _smootherstep(u / ATK) * _smootherstep((1.0 - u) / REL)
+        fade_frac = min(max((self.fade_ms / 1000.0) / max(self.dur, 1e-9), 0.01), 0.9)
+        gate = FLOOR + (1.0 - FLOOR) * _smootherstep(u / fade_frac) * _smootherstep((1.0 - u) / fade_frac)
         cur_f = VOW[self._vw_cur]
         if self._nasal_cur and dt < 0.028:
             mm = _smootherstep(dt / 0.028)
@@ -506,5 +555,5 @@ class Minionese:
             out = np.zeros(0, dtype=np.float32)
 
         np.nan_to_num(out, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
-        out, self._slew_prev = _slew_limit(out, MAX_SLEW, self._slew_prev)
+        out, self._slew_prev = _slew_limit(out, self.max_slew, self._slew_prev)
         return out

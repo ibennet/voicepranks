@@ -1,15 +1,40 @@
-"""Minimal tkinter GUI for the Minion Voice engine."""
+"""Minimal tkinter GUI for the Minion Voice engine.
+
+Every tunable in `params.PARAM_SPECS` gets a generated slider/checkbox in
+a scrollable grid here, so the desktop UI never hardcodes the param list
+-- add a knob to the registry and it shows up automatically. The same
+registry backs the HTTP control API (`control_server.py`), which this app
+also starts by default (set `MINION_NO_SERVER=1` to disable), so Claude
+or a `curl` can tweak params live while this window is open; sliders pick
+up out-of-band API changes on the next status poll.
+"""
 from __future__ import annotations
 
+import os
 import sys
 import tkinter as tk
 from tkinter import ttk
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..audio.devices import default_input_device, list_input_devices, list_output_devices
 from ..audio.engine import VoiceEngine
+from ..control_server import ControlServer
+from ..params import PARAM_SPECS, ParamSpec
 
 STATUS_REFRESH_MS = 250
+
+GROUP_LABELS = {
+    "global": "Global",
+    "effect": "Plain mode (pitch + EQ)",
+    "minionese": "Minionese (gibberish)",
+    "pitch": "Pitch engine (advanced)",
+    "io": "I/O (restarts audio)",
+}
+GROUP_ORDER = ["global", "effect", "minionese", "pitch", "io"]
+
+# These are already covered by the dedicated device combos below, so they
+# are left out of the generated grid to avoid two controls for one param.
+_SKIP_PARAM_NAMES = {"enabled", "io.input_device", "io.output_device"}
 
 
 class MinionVoiceApp:
@@ -20,10 +45,20 @@ class MinionVoiceApp:
         self.engine = VoiceEngine()
         self.error_message: Optional[str] = None
 
-        self._slider_dragging = False
+        self._slider_dragging = False  # legacy flag, kept for compat
+        self._dragging: Dict[str, bool] = {}
+        self._param_widgets: Dict[str, dict] = {}
+        self._suppress_commands = False
+
+        self.control_server: Optional[ControlServer] = None
+        if os.environ.get("MINION_NO_SERVER") != "1":
+            self.control_server = ControlServer(self.engine)
+            url = self.control_server.start()
+            sys.stderr.write(f"[minion_voice] control API listening at {url}\n")
 
         self._build_widgets()
         self._populate_devices()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._refresh_status()
 
     # -- UI construction -------------------------------------------------
@@ -31,46 +66,114 @@ class MinionVoiceApp:
     def _build_widgets(self) -> None:
         frame = ttk.Frame(self.root, padding=12)
         frame.grid(row=0, column=0, sticky="nsew")
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        frame.rowconfigure(4, weight=1)
+        frame.columnconfigure(1, weight=1)
 
-        self.toggle_var = tk.StringVar(value="Turn On")
         self.toggle_button = ttk.Button(frame, text="Turn On", command=self._on_toggle)
         self.toggle_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
 
-        ttk.Label(frame, text="Intensity").grid(row=1, column=0, sticky="w")
-        self.intensity_var = tk.DoubleVar(value=100.0)
-        self.intensity_slider = ttk.Scale(
-            frame,
-            from_=0,
-            to=100,
-            orient="horizontal",
-            variable=self.intensity_var,
-            command=self._on_slider_move,
-        )
-        self.intensity_slider.grid(row=1, column=1, sticky="ew", pady=4)
-
-        self.gibberish_var = tk.BooleanVar(value=False)
-        self.gibberish_check = ttk.Checkbutton(
-            frame,
-            text="Minionese (gibberish)",
-            variable=self.gibberish_var,
-            command=self._on_gibberish_toggle,
-        )
-        self.gibberish_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
-
-        ttk.Label(frame, text="Input device").grid(row=3, column=0, sticky="w")
+        ttk.Label(frame, text="Input device").grid(row=1, column=0, sticky="w")
         self.input_var = tk.StringVar()
         self.input_combo = ttk.Combobox(frame, textvariable=self.input_var, state="readonly")
-        self.input_combo.grid(row=3, column=1, sticky="ew", pady=4)
+        self.input_combo.grid(row=1, column=1, sticky="ew", pady=4)
+        self.input_combo.bind("<<ComboboxSelected>>", self._on_input_device_change)
 
-        ttk.Label(frame, text="Output device").grid(row=4, column=0, sticky="w")
+        ttk.Label(frame, text="Output device").grid(row=2, column=0, sticky="w")
         self.output_var = tk.StringVar()
         self.output_combo = ttk.Combobox(frame, textvariable=self.output_var, state="readonly")
-        self.output_combo.grid(row=4, column=1, sticky="ew", pady=4)
+        self.output_combo.grid(row=2, column=1, sticky="ew", pady=4)
+        self.output_combo.bind("<<ComboboxSelected>>", self._on_output_device_change)
+
+        self._build_recorder_row(frame, row=3)
+
+        # Scrollable area holding one generated control per PARAM_SPECS
+        # entry, grouped by `spec.group`.
+        scroll_container = ttk.Frame(frame)
+        scroll_container.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(4, 8))
+        scroll_container.rowconfigure(0, weight=1)
+        scroll_container.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(scroll_container, borderwidth=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        self._param_grid = ttk.Frame(canvas)
+        self._param_grid.bind(
+            "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=self._param_grid, anchor="nw")
+        self._param_grid.columnconfigure(1, weight=1)
+
+        self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        frame.columnconfigure(1, weight=1)
+    def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
+        rec_frame = ttk.Frame(frame)
+        rec_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Button(rec_frame, text="Record", command=self._on_record).pack(side="left", padx=(0, 4))
+        ttk.Button(rec_frame, text="Stop", command=self._on_record_stop).pack(side="left", padx=4)
+        ttk.Button(rec_frame, text="Re-render & Play", command=self._on_rerender_play).pack(side="left", padx=4)
+        ttk.Button(rec_frame, text="Play Raw", command=self._on_play_raw).pack(side="left", padx=4)
+
+    def _build_param_controls(self, parent: ttk.Frame) -> None:
+        groups: Dict[str, List[ParamSpec]] = {}
+        for spec in PARAM_SPECS:
+            if spec.name in _SKIP_PARAM_NAMES:
+                continue
+            groups.setdefault(spec.group, []).append(spec)
+
+        row = 0
+        for group in GROUP_ORDER:
+            specs = groups.get(group)
+            if not specs:
+                continue
+            header = ttk.Label(parent, text=GROUP_LABELS.get(group, group))
+            header.configure(font=("TkDefaultFont", 10, "bold"))
+            header.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 2))
+            row += 1
+            for spec in specs:
+                self._build_one_control(parent, spec, row)
+                row += 1
+
+    def _build_one_control(self, parent: ttk.Frame, spec: ParamSpec, row: int) -> None:
+        ttk.Label(parent, text=spec.label).grid(row=row, column=0, sticky="w", padx=(4, 4))
+
+        if spec.kind == "bool":
+            var = tk.BooleanVar(value=bool(spec.default))
+            cb = ttk.Checkbutton(
+                parent, variable=var, command=lambda s=spec, v=var: self._on_param_checkbox(s, v)
+            )
+            cb.grid(row=row, column=1, columnspan=2, sticky="w")
+            self._param_widgets[spec.name] = {"kind": "bool", "var": var, "spec": spec}
+            return
+
+        var = tk.DoubleVar(value=float(spec.default))
+        scale = ttk.Scale(
+            parent,
+            from_=spec.min,
+            to=spec.max,
+            orient="horizontal",
+            variable=var,
+            command=lambda val, s=spec: self._on_param_slider(s, val),
+        )
+        scale.grid(row=row, column=1, sticky="ew", padx=(4, 4))
+        readout = ttk.Label(parent, text=self._format_value(spec, spec.default), width=8)
+        readout.grid(row=row, column=2, sticky="w")
+        scale.bind("<ButtonPress-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, True))
+        scale.bind("<ButtonRelease-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, False))
+        self._param_widgets[spec.name] = {"kind": spec.kind, "var": var, "readout": readout, "spec": spec}
+
+    @staticmethod
+    def _format_value(spec: ParamSpec, value) -> str:
+        if spec.kind == "int":
+            return str(int(round(float(value))))
+        return f"{float(value):.3g}"
 
     def _populate_devices(self) -> None:
         self._input_devices: List[Tuple[int, str]] = []
@@ -140,38 +243,131 @@ class MinionVoiceApp:
                 self._refresh_status()
                 return
 
-        currently_enabled = self.engine.enabled
-        self.engine.set_enabled(not currently_enabled)
-
-        if not self._slider_dragging and self.engine.enabled:
-            # Let the auto-ramp drive intensity unless the user has already
-            # dragged the slider to a manual value.
-            pass
-
+        self.engine.set_enabled(not self.engine.enabled)
         self.toggle_button.config(text="Turn Off" if self.engine.enabled else "Turn On")
 
-    def _on_slider_move(self, _value: str) -> None:
-        self._slider_dragging = True
-        t = self.intensity_var.get() / 100.0
-        self.engine.set_manual_intensity(t)
+    def _on_input_device_change(self, _evt) -> None:
+        idx = self._selected_device_index(self.input_combo)
+        if idx is None:
+            return
+        try:
+            self.engine.set_param("io.input_device", idx)
+        except Exception as exc:
+            self.error_message = f"Failed to switch input device: {exc}"
 
-    def _on_gibberish_toggle(self) -> None:
-        self.engine.set_gibberish(self.gibberish_var.get())
+    def _on_output_device_change(self, _evt) -> None:
+        idx = self._selected_device_index(self.output_combo)
+        if idx is None:
+            return
+        try:
+            self.engine.set_param("io.output_device", idx)
+        except Exception as exc:
+            self.error_message = f"Failed to switch output device: {exc}"
+
+    def _on_param_slider(self, spec: ParamSpec, value_str: str) -> None:
+        if self._suppress_commands:
+            return
+        self._slider_dragging = True
+        try:
+            value = float(value_str)
+        except (TypeError, ValueError):
+            return
+        if spec.kind == "int":
+            value = int(round(value))
+        widget = self._param_widgets.get(spec.name)
+        if widget is not None:
+            widget["readout"].config(text=self._format_value(spec, value))
+        try:
+            self.engine.set_param(spec.name, value)
+        except Exception as exc:
+            self.error_message = f"Failed to set {spec.name}: {exc}"
+
+    def _on_param_checkbox(self, spec: ParamSpec, var: tk.BooleanVar) -> None:
+        if self._suppress_commands:
+            return
+        try:
+            self.engine.set_param(spec.name, bool(var.get()))
+        except Exception as exc:
+            self.error_message = f"Failed to set {spec.name}: {exc}"
+
+    # -- recorder ----------------------------------------------------------
+
+    def _on_record(self) -> None:
+        self.engine.record_start()
+
+    def _on_record_stop(self) -> None:
+        self.engine.record_stop()
+
+    def _on_rerender_play(self) -> None:
+        try:
+            self.engine.render_current()
+            self.engine.play("rendered")
+        except Exception as exc:
+            self.error_message = f"Re-render/play failed: {exc}"
+
+    def _on_play_raw(self) -> None:
+        try:
+            self.engine.play("raw")
+        except Exception as exc:
+            self.error_message = f"Play raw failed: {exc}"
 
     # -- status polling ------------------------------------------------
 
     def _refresh_status(self) -> None:
         status = self.engine.get_status()
+        snapshot = self.engine.snapshot()
+
+        # Reflect any out-of-band (API-driven) param changes in the
+        # widgets, without re-triggering their commands and without
+        # yanking a slider the user is currently dragging.
+        self._suppress_commands = True
+        try:
+            for name, widget in self._param_widgets.items():
+                if name not in snapshot:
+                    continue
+                value = snapshot[name]
+                if widget["kind"] == "bool":
+                    if bool(widget["var"].get()) != bool(value):
+                        widget["var"].set(bool(value))
+                else:
+                    if self._dragging.get(name):
+                        continue
+                    try:
+                        changed = abs(float(widget["var"].get()) - float(value)) > 1e-9
+                    except (TypeError, ValueError):
+                        changed = True
+                    if changed:
+                        widget["var"].set(value)
+                        widget["readout"].config(text=self._format_value(widget["spec"], value))
+        finally:
+            self._suppress_commands = False
+
+        level = status.get("level", {})
         error_suffix = f"\nError: {self.error_message}" if self.error_message else ""
+        take_state = "recording" if status.get("recording") else "stopped"
         text = (
-            f"Intensity: {status['intensity'] * 100:.0f}%   "
-            f"Underruns: {status['underruns']}   "
-            f"Overruns: {status['overruns']}   "
-            f"Running: {status['running']}"
+            f"Running: {status['running']}   Enabled: {status['enabled']}   "
+            f"Underruns: {status['underruns']}   Overruns: {status['overruns']}\n"
+            f"Level  dry: {level.get('dry_rms', 0.0):.3f} rms / {level.get('dry_peak', 0.0):.3f} pk   "
+            f"out: {level.get('processed_rms', 0.0):.3f} rms / {level.get('processed_peak', 0.0):.3f} pk\n"
+            f"Take: {take_state}, {status.get('take_seconds', 0.0):.1f}s   "
+            f"raw={'yes' if status.get('has_raw_take') else 'no'}   "
+            f"rendered={'yes' if status.get('has_rendered_take') else 'no'}"
             f"{error_suffix}"
         )
         self.status_label.config(text=text)
         self.root.after(STATUS_REFRESH_MS, self._refresh_status)
+
+    # -- shutdown ------------------------------------------------------
+
+    def _on_close(self) -> None:
+        try:
+            if self.control_server is not None:
+                self.control_server.stop()
+            if self.engine.running:
+                self.engine.stop()
+        finally:
+            self.root.destroy()
 
 
 def _warn_if_broken_tk() -> None:

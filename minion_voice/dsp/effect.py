@@ -22,18 +22,30 @@ from .pitch import PitchShifter
 
 
 class MinionEffect:
-    """Pitch-shift-up voice effect, driven by intensity. Flat (no EQ)."""
+    """Pitch-shift-up voice effect, driven by intensity. Flat (no EQ) by
+    default; the EQ stage can be re-enabled live via `set_eq_enabled`."""
 
     MAX_SEMITONES = 8.5
     MAX_EQ_GAIN_DB = 0.0
     EQ_CENTER_HZ = 2000.0
+    EQ_Q = 1.0
 
     def __init__(self, sample_rate: int, channels: int = 1) -> None:
         self.sample_rate = int(sample_rate)
         self.channels = int(channels)
 
+        # Instance copies of the class-level defaults above, so each
+        # MinionEffect can be tuned independently without touching the
+        # module constants (which existing tests/selftest still rely on
+        # as defaults).
+        self.max_semitones = self.MAX_SEMITONES
+        self.max_eq_gain_db = self.MAX_EQ_GAIN_DB
+        self.eq_center_hz = self.EQ_CENTER_HZ
+        self.eq_q = self.EQ_Q
+        self.eq_enabled = False
+
         self.pitch = PitchShifter(sample_rate)
-        self.eq = PeakingEQ(sample_rate, center_hz=self.EQ_CENTER_HZ, q=1.0, gain_db=0.0)
+        self.eq = PeakingEQ(sample_rate, center_hz=self.eq_center_hz, q=self.eq_q, gain_db=0.0)
         self.minionese = Minionese(sample_rate)
         self.gibberish = False
 
@@ -42,12 +54,31 @@ class MinionEffect:
     def set_intensity(self, t: float) -> None:
         t = min(max(float(t), 0.0), 1.0)
         self.intensity = t
-        self.pitch.set_semitones(self.MAX_SEMITONES * t)
-        self.eq.set_gain_db(self.MAX_EQ_GAIN_DB * t)
+        self.pitch.set_semitones(self.max_semitones * t)
+        self.eq.set_gain_db(self.max_eq_gain_db * t)
         self.minionese.set_intensity(t)
 
     def set_gibberish(self, b: bool) -> None:
         self.gibberish = bool(b)
+
+    def set_max_semitones(self, semitones: float) -> None:
+        self.max_semitones = float(semitones)
+        self.set_intensity(self.intensity)
+
+    def set_eq_enabled(self, b: bool) -> None:
+        self.eq_enabled = bool(b)
+
+    def set_eq_gain_db(self, gain_db: float) -> None:
+        self.max_eq_gain_db = float(gain_db)
+        self.set_intensity(self.intensity)
+
+    def set_eq_center_hz(self, center_hz: float) -> None:
+        self.eq_center_hz = float(center_hz)
+        self.eq.set_center_hz(self.eq_center_hz)
+
+    def set_eq_q(self, q: float) -> None:
+        self.eq_q = float(q)
+        self.eq.set_q(self.eq_q)
 
     def reset(self) -> None:
         self.pitch.reset()
@@ -55,4 +86,9 @@ class MinionEffect:
         self.minionese.reset()
 
     def process(self, mono: np.ndarray) -> np.ndarray:
-        return self.minionese.process(mono) if self.gibberish else self.pitch.process(mono)
+        if self.gibberish:
+            return self.minionese.process(mono)
+        out = self.pitch.process(mono)
+        if self.eq_enabled:
+            out = self.eq.process(out)
+        return out

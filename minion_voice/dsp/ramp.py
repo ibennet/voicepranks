@@ -13,6 +13,10 @@ class IntensityRamp:
         self._lock = threading.Lock()
         self._start_time: float | None = None
 
+    def set_duration(self, seconds: float) -> None:
+        with self._lock:
+            self.duration_s = float(seconds)
+
     def start(self) -> None:
         with self._lock:
             self._start_time = time.monotonic()
