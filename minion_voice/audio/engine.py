@@ -128,6 +128,11 @@ class VoiceEngine:
             dtype="float32",
             callback=self._output_callback,
         )
+        # Pre-fill the ring with a short silence cushion so the output stream
+        # doesn't starve while the effect's internal pipeline latency (WSOLA +
+        # Minionese STFT buffering, up to ~60ms) fills in after start. Without
+        # this the first ~second of Minionese mode underruns while it primes.
+        self._prime_ring(90.0)
         self.input_stream.start()
         self.output_stream.start()
         self.running = True
@@ -158,6 +163,18 @@ class VoiceEngine:
 
     def set_gibberish(self, b: bool) -> None:
         self.effect.set_gibberish(b)
+        # Switching into Minionese mid-run resets its internal pipeline, so
+        # give the ring the same cushion to avoid a toggle-on dropout.
+        if b and self.running:
+            self._prime_ring(90.0)
+
+    def _prime_ring(self, ms: float) -> None:
+        """Top the output ring up to `ms` of buffered silence — a startup /
+        mode-switch cushion against the effect pipeline's latency."""
+        target = int(self.sample_rate * ms / 1000.0)
+        need = target - self.ring.count
+        if need > 0:
+            self.ring.write(np.zeros(need, dtype=np.float32))
 
     def get_status(self) -> dict:
         return {
