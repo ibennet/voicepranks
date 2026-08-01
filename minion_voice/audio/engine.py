@@ -170,6 +170,7 @@ class VoiceEngine:
             if not self._pending:
                 return
             pending, self._pending = self._pending, {}
+        reprime = False
         for name, value in pending.items():
             handlers = self._registry.get(name)
             if handlers is None:
@@ -178,6 +179,16 @@ class VoiceEngine:
                 handlers.set(value)
             except Exception as exc:  # keep the audio thread alive
                 self.last_error = str(exc)
+                continue
+            # Params that rebuild a DSP stage (`needs_reset`) or switch the
+            # gibberish engine can change the active path's buffering latency
+            # -- notably the shuffle window. Re-prime the output cushion so a
+            # freshly-enlarged window can't starve the stream mid-run.
+            spec = params.PARAM_SPECS_BY_NAME.get(name)
+            if name == "minionese.use_shuffle" or (spec is not None and spec.needs_reset):
+                reprime = True
+        if reprime and self.running:
+            self._prime_for_effect()
 
     def set_io_param(self, name: str, value) -> None:
         """Apply an `io.*` param, restarting the streams (stop then start)
@@ -250,11 +261,12 @@ class VoiceEngine:
             dtype="float32",
             callback=self._output_callback,
         )
-        # Pre-fill the ring with a short silence cushion so the output stream
-        # doesn't starve while the effect's internal pipeline latency (WSOLA +
-        # Minionese STFT buffering, up to ~60ms) fills in after start. Without
-        # this the first ~second of Minionese mode underruns while it primes.
-        self._prime_ring(90.0)
+        # Pre-fill the ring with a silence cushion sized to the active
+        # effect path's internal buffering latency, so the output stream
+        # doesn't starve while that latency fills in after start. Critical
+        # for the shuffle gibberish engine, whose latency grows with the
+        # scramble amount (a full shuffle window can be ~1s).
+        self._prime_for_effect()
         self.input_stream.start()
         self.output_stream.start()
         self.running = True
@@ -285,10 +297,11 @@ class VoiceEngine:
 
     def set_gibberish(self, b: bool) -> None:
         self.effect.set_gibberish(b)
-        # Switching into Minionese mid-run resets its internal pipeline, so
-        # give the ring the same cushion to avoid a toggle-on dropout.
+        # Switching into a gibberish engine mid-run resets its internal
+        # pipeline, so re-prime the ring to that engine's latency to avoid a
+        # toggle-on dropout.
         if b and self.running:
-            self._prime_ring(90.0)
+            self._prime_for_effect()
 
     def _prime_ring(self, ms: float) -> None:
         """Top the output ring up to `ms` of buffered silence — a startup /
@@ -297,6 +310,48 @@ class VoiceEngine:
         need = target - self.ring.count
         if need > 0:
             self.ring.write(np.zeros(need, dtype=np.float32))
+
+    def _cushion_ms(self) -> float:
+        """Output pre-fill needed to cover the active effect path's internal
+        buffering latency, plus headroom. The shuffle gibberish engine must
+        accumulate a full shuffle window before emitting, so its latency (and
+        thus the cushion) grows with the scramble amount; if we primed a
+        fixed cushion smaller than that window the output would starve every
+        window. Headroom (1.5x + 60ms) absorbs block jitter."""
+        try:
+            eff_latency = self.effect.latency_ms()
+        except Exception:
+            eff_latency = 0.0
+        return eff_latency * 1.5 + 60.0
+
+    def _ensure_ring_capacity(self, ms: float) -> None:
+        """Grow the output ring so it can actually hold `ms` of cushion.
+        The ring drops oldest samples when full, so a cushion larger than
+        capacity would be silently truncated -> underruns. Growing on the
+        audio thread is safe here because `_RingBuffer` is only read/written
+        under its own lock and we swap in a pre-filled replacement."""
+        target = int(self.sample_rate * ms / 1000.0)
+        want_capacity = max(self.blocksize * 2, target + self.blocksize * 2)
+        if want_capacity > self.ring.capacity:
+            old = self.ring
+            new = _RingBuffer(want_capacity)
+            # `read`/`write` each lock internally; don't hold `old.lock` here
+            # (it's non-reentrant -> would deadlock). Carry over buffered
+            # audio and the cumulative under/overrun counters.
+            carried = old.read(old.count) if old.count > 0 else np.zeros(0, dtype=np.float32)
+            new.underruns = old.underruns
+            new.overruns = old.overruns
+            if carried.size > 0:
+                new.write(carried)
+            self.ring = new
+
+    def _prime_for_effect(self) -> None:
+        """Size the ring and pre-fill it to cover the active effect path's
+        latency. Called on start, on gibberish toggle, and after a scramble
+        param reset — anywhere the effect's internal latency may have grown."""
+        cushion = self._cushion_ms()
+        self._ensure_ring_capacity(cushion + self.blocksize / self.sample_rate * 1000.0)
+        self._prime_ring(cushion)
 
     def get_status(self) -> dict:
         return {

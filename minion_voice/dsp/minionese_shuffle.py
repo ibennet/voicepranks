@@ -319,6 +319,17 @@ class MinioneseShuffle:
         """Output slew-rate ceiling; no rebuild needed."""
         self.max_slew = float(max_slew)
 
+    def latency_ms(self) -> float:
+        """Algorithmic buffering latency, in ms. The scrambler must
+        accumulate a full shuffle window (`shuffle_k * chunk_ms`) before it
+        can emit any output, plus the crossfade lookahead and the WSOLA
+        pitch frame. The engine sizes its output pre-fill from this so the
+        live path doesn't starve while the window fills."""
+        window_ms = (self._scramble.K * self._scramble.C) / float(self.sample_rate) * 1000.0
+        fade_ms = self._scramble.fade / float(self.sample_rate) * 1000.0
+        pitch_ms = self._pitch.L / float(self.sample_rate) * 1000.0
+        return window_ms + fade_ms + pitch_ms
+
     def reset(self) -> None:
         self._pitch.reset()
         self._wobble.reset()

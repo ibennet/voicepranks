@@ -341,6 +341,13 @@ class Minionese:
         """Output slew-rate ceiling; no rebuild needed."""
         self.max_slew = float(max_slew)
 
+    def latency_ms(self) -> float:
+        """Algorithmic buffering latency, in ms: the STFT analysis window
+        must fill before any frame is emitted, on top of the WSOLA pitch
+        frame. Small and fixed (unlike the shuffle engine, whose latency
+        grows with its shuffle window)."""
+        return (self.N + self._pitch.L) / float(self.sample_rate) * 1000.0
+
     def set_floor(self, floor: float) -> None:
         """Inter-syllable gate floor (0..1). Lower -> the gate closes
         harder between syllables (quieter gaps, less continuous drone),

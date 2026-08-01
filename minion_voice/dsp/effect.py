@@ -77,6 +77,16 @@ class MinionEffect:
         (`MinioneseShuffle`), False -> STFT formant (`Minionese`)."""
         self.use_shuffle = bool(b)
 
+    def latency_ms(self) -> float:
+        """Algorithmic buffering latency of the *currently active* path, in
+        ms. Zero for the plain pitch shift (WSOLA emits continuously); the
+        active gibberish engine's own latency when gibberish is on. The
+        engine uses this to size its output pre-fill so the live path never
+        starves while the effect's internal buffers prime."""
+        if self.gibberish:
+            return self._gibberish_engine().latency_ms()
+        return 0.0
+
     def set_max_semitones(self, semitones: float) -> None:
         self.max_semitones = float(semitones)
         self.set_intensity(self.intensity)
