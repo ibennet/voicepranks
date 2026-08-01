@@ -8,9 +8,13 @@ the pitch shifter itself changed to WSOLA. The EQ stage (`PeakingEQ` in
 process chain) so it can be re-enabled later without touching
 `engine.py`/`ui/app.py`.
 
-A second, alternate mode -- "Minionese" gibberish (`dsp/minionese.py`) --
-can be toggled on via `set_gibberish()`. When enabled, `process()` routes
-through `Minionese` instead of the plain WSOLA pitch shift.
+A second, alternate mode -- "Minionese" gibberish -- can be toggled on via
+`set_gibberish()`. When enabled, `process()` routes through a gibberish
+engine instead of the plain WSOLA pitch shift. There are two gibberish
+engines and `set_use_shuffle()` picks between them:
+  - `Minionese` (`dsp/minionese.py`): STFT formant-replacement.
+  - `MinioneseShuffle` (`dsp/minionese_shuffle.py`): time-domain WSOLA +
+    syllable-chunk shuffle (cleaner tone, scrambles real syllables).
 """
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ import numpy as np
 
 from .biquad import PeakingEQ
 from .minionese import Minionese
+from .minionese_shuffle import MinioneseShuffle
 from .pitch import PitchShifter
 
 
@@ -47,9 +52,14 @@ class MinionEffect:
         self.pitch = PitchShifter(sample_rate)
         self.eq = PeakingEQ(sample_rate, center_hz=self.eq_center_hz, q=self.eq_q, gain_db=0.0)
         self.minionese = Minionese(sample_rate)
+        self.shuffle = MinioneseShuffle(sample_rate)
         self.gibberish = False
+        self.use_shuffle = True  # which gibberish engine: shuffle (True) or formant
 
         self.intensity = 0.0
+
+    def _gibberish_engine(self):
+        return self.shuffle if self.use_shuffle else self.minionese
 
     def set_intensity(self, t: float) -> None:
         t = min(max(float(t), 0.0), 1.0)
@@ -57,9 +67,15 @@ class MinionEffect:
         self.pitch.set_semitones(self.max_semitones * t)
         self.eq.set_gain_db(self.max_eq_gain_db * t)
         self.minionese.set_intensity(t)
+        self.shuffle.set_intensity(t)
 
     def set_gibberish(self, b: bool) -> None:
         self.gibberish = bool(b)
+
+    def set_use_shuffle(self, b: bool) -> None:
+        """Pick the gibberish engine: True -> time-domain shuffle
+        (`MinioneseShuffle`), False -> STFT formant (`Minionese`)."""
+        self.use_shuffle = bool(b)
 
     def set_max_semitones(self, semitones: float) -> None:
         self.max_semitones = float(semitones)
@@ -84,10 +100,11 @@ class MinionEffect:
         self.pitch.reset()
         self.eq.reset()
         self.minionese.reset()
+        self.shuffle.reset()
 
     def process(self, mono: np.ndarray) -> np.ndarray:
         if self.gibberish:
-            return self.minionese.process(mono)
+            return self._gibberish_engine().process(mono)
         out = self.pitch.process(mono)
         if self.eq_enabled:
             out = self.eq.process(out)

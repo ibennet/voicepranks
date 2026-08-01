@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
 from .dsp import minionese as minionese_mod
+from .dsp import minionese_shuffle as shuffle_mod
 from .dsp.effect import MinionEffect
 from .dsp.pitch import PitchShifter
 from .dsp.ramp import IntensityRamp
@@ -72,6 +73,15 @@ PARAM_SPECS = [
     ParamSpec("minionese.floor", "minionese", "Gate floor", "float", 0.0, 1.0, 0.05, minionese_mod.FLOOR),
     ParamSpec("minionese.resid_f", "minionese", "Residual mix", "float", 0.0, 1.0, 0.05, minionese_mod.RESID_F),
     ParamSpec("minionese.vad_thresh", "minionese", "VAD threshold", "float", 0.0, 0.5, 0.01, minionese_mod.VAD_REL_THRESH),
+    ParamSpec("minionese.use_shuffle", "minionese", "Shuffle engine (vs formant)", "bool", 0, 1, 1, True),
+
+    # -- shuffle gibberish engine (time-domain WSOLA + chunk shuffle) -----
+    ParamSpec("shuffle.semitones", "shuffle", "Semitones", "float", 0.0, 12.0, 0.1, shuffle_mod.SEMITONES),
+    ParamSpec("shuffle.wobble_ms", "shuffle", "Wobble depth (ms)", "float", 0.0, 12.0, 0.1, shuffle_mod.WOBBLE_MS),
+    ParamSpec("shuffle.chunk_ms", "shuffle", "Chunk length (ms)", "float", 40.0, 400.0, 5.0, shuffle_mod.CHUNK_MS, needs_reset=True),
+    ParamSpec("shuffle.shuffle_k", "shuffle", "Chunks per window", "int", 1, 8, 1, shuffle_mod.SHUFFLE_K, needs_reset=True),
+    ParamSpec("shuffle.fade_ms", "shuffle", "Crossfade (ms)", "float", 0.0, 60.0, 1.0, shuffle_mod.FADE_MS, needs_reset=True),
+    ParamSpec("shuffle.max_slew", "shuffle", "Max output slew", "float", 0.02, 1.0, 0.01, shuffle_mod.MAX_SLEW),
 
     # -- pitch engine (advanced, shared WSOLA implementation) -------------
     ParamSpec("pitch.frame", "pitch", "WSOLA frame size", "int", 256, 4096, 64, 1024, needs_reset=True),
@@ -105,6 +115,7 @@ def build_effect_registry(effect: MinionEffect) -> Dict[str, ParamHandlers]:
     """
     pitch: PitchShifter = effect.pitch
     m = effect.minionese
+    sh = effect.shuffle
     reg: Dict[str, ParamHandlers] = {
         "effect.max_semitones": ParamHandlers(
             get=lambda: effect.max_semitones,
@@ -161,6 +172,34 @@ def build_effect_registry(effect: MinionEffect) -> Dict[str, ParamHandlers]:
         "minionese.vad_thresh": ParamHandlers(
             get=lambda: m.vad_thresh,
             set=lambda v: m.set_vad_thresh(float(v)),
+        ),
+        "minionese.use_shuffle": ParamHandlers(
+            get=lambda: effect.use_shuffle,
+            set=lambda v: effect.set_use_shuffle(bool(v)),
+        ),
+        "shuffle.semitones": ParamHandlers(
+            get=lambda: sh.semitones,
+            set=lambda v: sh.set_semitones(float(v)),
+        ),
+        "shuffle.wobble_ms": ParamHandlers(
+            get=lambda: sh.wobble_ms,
+            set=lambda v: sh.set_wobble_ms(float(v)),
+        ),
+        "shuffle.chunk_ms": ParamHandlers(
+            get=lambda: sh.chunk_ms,
+            set=lambda v: sh.set_chunk_ms(float(v)),
+        ),
+        "shuffle.shuffle_k": ParamHandlers(
+            get=lambda: sh.shuffle_k,
+            set=lambda v: sh.set_shuffle_k(int(v)),
+        ),
+        "shuffle.fade_ms": ParamHandlers(
+            get=lambda: sh.fade_ms,
+            set=lambda v: sh.set_fade_ms(float(v)),
+        ),
+        "shuffle.max_slew": ParamHandlers(
+            get=lambda: sh.max_slew,
+            set=lambda v: sh.set_max_slew(float(v)),
         ),
         "pitch.frame": ParamHandlers(
             get=lambda: pitch.L,
