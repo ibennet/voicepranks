@@ -26,11 +26,12 @@ STATUS_REFRESH_MS = 250
 GROUP_LABELS = {
     "global": "Global",
     "effect": "Plain mode (pitch + EQ)",
-    "minionese": "Minionese (gibberish)",
+    "minionese": "Minionese — formant engine",
+    "shuffle": "Minionese — shuffle engine",
     "pitch": "Pitch engine (advanced)",
     "io": "I/O (restarts audio)",
 }
-GROUP_ORDER = ["global", "effect", "minionese", "pitch", "io"]
+GROUP_ORDER = ["global", "effect", "minionese", "shuffle", "pitch", "io"]
 
 # These are already covered by the dedicated device combos below, so they
 # are left out of the generated grid to avoid two controls for one param.
