@@ -115,6 +115,17 @@ class VoiceEngine:
         self.running = False
         self.last_error: Optional[str] = None
 
+        # -- live monitor: a second output stream to an audible device
+        # (speakers/headphones) so the user can HEAR the processed effect in
+        # real time while the main output feeds the virtual cable. Fed the
+        # same processed audio via its own ring so the two sinks don't fight
+        # over one buffer. `monitor_device=None` -> system default output.
+        self.monitor_enabled = False
+        self.monitor_device: Optional[int] = None
+        self.monitor_stream: Optional[sd.OutputStream] = None
+        self.monitor_ring = _RingBuffer(ring_capacity)
+        self._monitor_out_channels = 1
+
         # -- live param registry (single source of truth; see params.py) --
         self._registry = params.build_engine_registry(self)
         self._pending: dict = {}
@@ -270,8 +281,11 @@ class VoiceEngine:
         self.input_stream.start()
         self.output_stream.start()
         self.running = True
+        if self.monitor_enabled:
+            self._open_monitor_stream()
 
     def stop(self) -> None:
+        self._close_monitor_stream()
         if self.input_stream is not None:
             self.input_stream.stop()
             self.input_stream.close()
@@ -281,6 +295,75 @@ class VoiceEngine:
             self.output_stream.close()
             self.output_stream = None
         self.running = False
+
+    # -- live monitor ----------------------------------------------------
+
+    def set_monitor_enabled(self, b: bool) -> None:
+        """Turn the live monitor (audible processed-audio output) on/off.
+        Opens/closes the monitor stream immediately if the engine is
+        running; otherwise it takes effect on the next `start()`."""
+        self.monitor_enabled = bool(b)
+        if not self.running:
+            return
+        if self.monitor_enabled:
+            self._open_monitor_stream()
+        else:
+            self._close_monitor_stream()
+
+    def set_monitor_device(self, device: Optional[int]) -> None:
+        """Pick the output device the live monitor plays to (None = system
+        default). Re-opens the monitor stream if it's currently active."""
+        self.monitor_device = None if device is None else int(device)
+        if self.running and self.monitor_enabled:
+            self._close_monitor_stream()
+            self._open_monitor_stream()
+
+    def _open_monitor_stream(self) -> None:
+        if self.monitor_stream is not None:
+            return
+        try:
+            device = self.monitor_device  # None -> system default output
+            # `query_devices(kind='output')` resolves the system default when
+            # no explicit device is given, without assuming the shape of
+            # `sd.default.device`.
+            info = sd.query_devices(device) if device is not None else sd.query_devices(kind="output")
+            channels = max(1, int(info.get("max_output_channels", 1)))
+            self._monitor_out_channels = channels
+            self.monitor_ring = _RingBuffer(self.ring.capacity)
+            self._prime_ring_target(self.monitor_ring, self._cushion_ms())
+            self.monitor_stream = sd.OutputStream(
+                device=device,
+                channels=channels,
+                samplerate=self.sample_rate,
+                blocksize=self.blocksize,
+                dtype="float32",
+                callback=self._monitor_output_callback,
+            )
+            self.monitor_stream.start()
+        except Exception as exc:
+            self.last_error = f"Live monitor failed: {exc}"
+            self.monitor_stream = None
+
+    def _close_monitor_stream(self) -> None:
+        if self.monitor_stream is not None:
+            try:
+                self.monitor_stream.stop()
+                self.monitor_stream.close()
+            except Exception:
+                pass
+            self.monitor_stream = None
+
+    def _monitor_output_callback(self, outdata, frames, time_info, status) -> None:  # noqa: D401
+        try:
+            mono = self.monitor_ring.read(frames)
+            channels = outdata.shape[1]
+            if channels == 1:
+                outdata[:, 0] = mono
+            else:
+                outdata[:, :] = np.repeat(mono.reshape(-1, 1), channels, axis=1)
+        except Exception as exc:
+            self.last_error = str(exc)
+            outdata.fill(0.0)
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = bool(enabled)
@@ -304,12 +387,16 @@ class VoiceEngine:
             self._prime_for_effect()
 
     def _prime_ring(self, ms: float) -> None:
-        """Top the output ring up to `ms` of buffered silence — a startup /
-        mode-switch cushion against the effect pipeline's latency."""
+        """Top the main output ring up to `ms` of buffered silence — a
+        startup / mode-switch cushion against the effect pipeline's latency."""
+        self._prime_ring_target(self.ring, ms)
+
+    def _prime_ring_target(self, ring: "_RingBuffer", ms: float) -> None:
+        """Top an arbitrary ring up to `ms` of buffered silence."""
         target = int(self.sample_rate * ms / 1000.0)
-        need = target - self.ring.count
+        need = target - ring.count
         if need > 0:
-            self.ring.write(np.zeros(need, dtype=np.float32))
+            ring.write(np.zeros(need, dtype=np.float32))
 
     def _cushion_ms(self) -> float:
         """Output pre-fill needed to cover the active effect path's internal
@@ -330,28 +417,40 @@ class VoiceEngine:
         capacity would be silently truncated -> underruns. Growing on the
         audio thread is safe here because `_RingBuffer` is only read/written
         under its own lock and we swap in a pre-filled replacement."""
+        self.ring = self._grown_ring(self.ring, ms)
+
+    def _grown_ring(self, ring: "_RingBuffer", ms: float) -> "_RingBuffer":
+        """Return a ring with capacity for at least `ms`, carrying over any
+        buffered audio and the cumulative counters. Returns `ring` unchanged
+        if it is already big enough."""
         target = int(self.sample_rate * ms / 1000.0)
         want_capacity = max(self.blocksize * 2, target + self.blocksize * 2)
-        if want_capacity > self.ring.capacity:
-            old = self.ring
-            new = _RingBuffer(want_capacity)
-            # `read`/`write` each lock internally; don't hold `old.lock` here
-            # (it's non-reentrant -> would deadlock). Carry over buffered
-            # audio and the cumulative under/overrun counters.
-            carried = old.read(old.count) if old.count > 0 else np.zeros(0, dtype=np.float32)
-            new.underruns = old.underruns
-            new.overruns = old.overruns
-            if carried.size > 0:
-                new.write(carried)
-            self.ring = new
+        if want_capacity <= ring.capacity:
+            return ring
+        new = _RingBuffer(want_capacity)
+        # `read`/`write` each lock internally; don't hold `ring.lock` here
+        # (it's non-reentrant -> would deadlock). Carry over buffered audio
+        # and the cumulative under/overrun counters.
+        carried = ring.read(ring.count) if ring.count > 0 else np.zeros(0, dtype=np.float32)
+        new.underruns = ring.underruns
+        new.overruns = ring.overruns
+        if carried.size > 0:
+            new.write(carried)
+        return new
 
     def _prime_for_effect(self) -> None:
-        """Size the ring and pre-fill it to cover the active effect path's
+        """Size the ring(s) and pre-fill to cover the active effect path's
         latency. Called on start, on gibberish toggle, and after a scramble
-        param reset — anywhere the effect's internal latency may have grown."""
+        param reset — anywhere the effect's internal latency may have grown.
+        The monitor ring gets the same treatment so the live monitor doesn't
+        starve on a big shuffle window either."""
         cushion = self._cushion_ms()
-        self._ensure_ring_capacity(cushion + self.blocksize / self.sample_rate * 1000.0)
+        capacity_ms = cushion + self.blocksize / self.sample_rate * 1000.0
+        self.ring = self._grown_ring(self.ring, capacity_ms)
         self._prime_ring(cushion)
+        if self.monitor_enabled and self.monitor_stream is not None:
+            self.monitor_ring = self._grown_ring(self.monitor_ring, capacity_ms)
+            self._prime_ring_target(self.monitor_ring, cushion)
 
     def get_status(self) -> dict:
         return {
@@ -361,6 +460,8 @@ class VoiceEngine:
             "running": self.running,
             "enabled": self.enabled,
             "gibberish": self.effect.gibberish,
+            "monitor": self.monitor_enabled,
+            "latency_ms": round(self.effect.latency_ms(), 1),
             "last_error": self.last_error,
             "recording": self._recording,
             "take_seconds": self._current_take_seconds(),
@@ -488,6 +589,10 @@ class VoiceEngine:
                 self._proc_peak = 0.0
 
             self.ring.write(processed)
+            # Feed the live monitor the same processed audio (its own ring so
+            # the two output streams don't consume each other's samples).
+            if self.monitor_enabled and self.monitor_stream is not None:
+                self.monitor_ring.write(processed)
         except Exception as exc:  # keep the audio thread alive
             self.last_error = str(exc)
 

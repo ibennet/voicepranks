@@ -35,7 +35,7 @@ GROUP_ORDER = ["global", "effect", "minionese", "shuffle", "pitch", "io"]
 
 # These are already covered by the dedicated device combos below, so they
 # are left out of the generated grid to avoid two controls for one param.
-_SKIP_PARAM_NAMES = {"enabled", "io.input_device", "io.output_device"}
+_SKIP_PARAM_NAMES = {"enabled", "io.input_device", "io.output_device", "monitor"}
 
 
 class MinionVoiceApp:
@@ -121,6 +121,19 @@ class MinionVoiceApp:
         ttk.Button(rec_frame, text="Stop", command=self._on_record_stop).pack(side="left", padx=4)
         ttk.Button(rec_frame, text="Re-render & Play", command=self._on_rerender_play).pack(side="left", padx=4)
         ttk.Button(rec_frame, text="Play Raw", command=self._on_play_raw).pack(side="left", padx=4)
+
+        # Live monitor: hear the processed effect on your speakers while
+        # recording, so you can judge the real-time sound (including the
+        # shuffle engine's latency) instead of only the offline re-render.
+        # Bound to the same `monitor` param as the API, hence skipped from
+        # the generated grid (see `_SKIP_PARAM_NAMES`).
+        self.monitor_var = tk.BooleanVar(value=self.engine.monitor_enabled)
+        ttk.Checkbutton(
+            rec_frame,
+            text="Live monitor",
+            variable=self.monitor_var,
+            command=self._on_monitor_toggle,
+        ).pack(side="left", padx=(12, 0))
 
     def _build_param_controls(self, parent: ttk.Frame) -> None:
         groups: Dict[str, List[ParamSpec]] = {}
@@ -294,10 +307,28 @@ class MinionVoiceApp:
     # -- recorder ----------------------------------------------------------
 
     def _on_record(self) -> None:
+        # Run the effect live during capture so the user hears the real-time
+        # result (via the live monitor) while recording, not just the offline
+        # re-render. Recording still captures the DRY signal, so re-render
+        # with tweaked params keeps working.
+        if not self.engine.running:
+            input_idx = self._selected_device_index(self.input_combo)
+            output_idx = self._selected_device_index(self.output_combo)
+            try:
+                self.engine.start(input_device=input_idx, output_device=output_idx)
+            except Exception as exc:
+                self.error_message = f"Could not start audio for recording: {exc}"
+                return
+        if not self.engine.enabled:
+            self.engine.set_enabled(True)
+            self.toggle_button.config(text="Turn Off")
         self.engine.record_start()
 
     def _on_record_stop(self) -> None:
         self.engine.record_stop()
+
+    def _on_monitor_toggle(self) -> None:
+        self.engine.set_param("monitor", self.monitor_var.get())
 
     def _on_rerender_play(self) -> None:
         try:
@@ -340,14 +371,20 @@ class MinionVoiceApp:
                     if changed:
                         widget["var"].set(value)
                         widget["readout"].config(text=self._format_value(widget["spec"], value))
+            # Keep the dedicated Live monitor checkbox in sync with
+            # API-driven changes (it's not in the generated grid).
+            if bool(self.monitor_var.get()) != bool(status.get("monitor", False)):
+                self.monitor_var.set(bool(status.get("monitor", False)))
         finally:
             self._suppress_commands = False
 
         level = status.get("level", {})
         error_suffix = f"\nError: {self.error_message}" if self.error_message else ""
         take_state = "recording" if status.get("recording") else "stopped"
+        monitor_state = "on" if status.get("monitor") else "off"
         text = (
             f"Running: {status['running']}   Enabled: {status['enabled']}   "
+            f"Monitor: {monitor_state}   Latency: {status.get('latency_ms', 0.0):.0f}ms\n"
             f"Underruns: {status['underruns']}   Overruns: {status['overruns']}\n"
             f"Level  dry: {level.get('dry_rms', 0.0):.3f} rms / {level.get('dry_peak', 0.0):.3f} pk   "
             f"out: {level.get('processed_rms', 0.0):.3f} rms / {level.get('processed_peak', 0.0):.3f} pk\n"

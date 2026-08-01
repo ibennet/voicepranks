@@ -44,6 +44,7 @@ PARAM_SPECS = [
     ParamSpec("enabled", "global", "Enabled", "bool", 0, 1, 1, False),
     ParamSpec("gibberish", "global", "Minionese (gibberish)", "bool", 0, 1, 1, False),
     ParamSpec("intensity", "global", "Intensity (manual)", "float", 0.0, 1.0, 0.01, 1.0),
+    ParamSpec("monitor", "global", "Live monitor (hear effect)", "bool", 0, 1, 1, False),
     ParamSpec("ramp.duration_s", "global", "Ramp duration (s)", "float", 0.0, 5.0, 0.1, IntensityRamp().duration_s),
 
     # -- plain mode (effect.py, flat pitch shift + optional EQ) ----------
@@ -93,6 +94,7 @@ PARAM_SPECS = [
     ParamSpec("io.ring_ms", "io", "Output ring buffer (ms)", "float", 50.0, 1000.0, 10.0, 200.0, needs_reset=True),
     ParamSpec("io.input_device", "io", "Input device", "int", -1, 999, 1, -1, needs_reset=True),
     ParamSpec("io.output_device", "io", "Output device", "int", -1, 999, 1, -1, needs_reset=True),
+    ParamSpec("io.monitor_device", "io", "Monitor device (-1=default)", "int", -1, 999, 1, -1),
 ]
 
 PARAM_SPECS_BY_NAME: Dict[str, ParamSpec] = {spec.name: spec for spec in PARAM_SPECS}
@@ -237,6 +239,10 @@ def build_engine_registry(engine) -> Dict[str, ParamHandlers]:
             ),
             set=lambda v: engine.set_manual_intensity(float(v)),
         ),
+        "monitor": ParamHandlers(
+            get=lambda: engine.monitor_enabled,
+            set=lambda v: engine.set_monitor_enabled(bool(v)),
+        ),
         "ramp.duration_s": ParamHandlers(
             get=lambda: engine.ramp.duration_s,
             set=lambda v: engine.ramp.set_duration(float(v)),
@@ -260,6 +266,10 @@ def build_engine_registry(engine) -> Dict[str, ParamHandlers]:
         "io.output_device": ParamHandlers(
             get=lambda: -1 if engine.output_device is None else int(engine.output_device),
             set=lambda v: engine.set_io_param("io.output_device", None if int(v) < 0 else int(v)),
+        ),
+        "io.monitor_device": ParamHandlers(
+            get=lambda: -1 if engine.monitor_device is None else int(engine.monitor_device),
+            set=lambda v: engine.set_monitor_device(None if int(v) < 0 else int(v)),
         ),
     }
     reg.update(build_effect_registry(engine.effect))
