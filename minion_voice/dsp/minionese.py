@@ -149,6 +149,43 @@ VAD_PEAK_DECAY = 0.999   # per-STFT-frame decay of the running peak
 VAD_ABS_FLOOR = 0.003    # absolute RMS floor so decayed-to-zero peaks
                           # don't self-trigger on noise during silence
 
+# Safety net, NOT part of the offline C1 spec: the `gsm` auto-gain-match
+# (see `_process_frame`) is a slow IIR-smoothed ratio with a hard 3.0x
+# ceiling. Whenever the envelope-replaced spectrum runs quiet relative to
+# the input for several frames in a row (common with these params -- the
+# offline reference itself spends over a third of its frames pinned at
+# the same 3.0x ceiling on the reference test clip), `gsm` saturates at
+# 3.0x and *stays* there across several frames. If the resonance-boosted
+# signal then suddenly gets louder while gsm is still pinned at max, the
+# result is briefly amplified ~3x more than it should be -- an audible
+# pop. This is inherent to the C1 params on real speech, not a streaming
+# bug (confirmed by replicating the offline algorithm verbatim and
+# observing the same ceiling-pinning behavior on the same input); the
+# *specific* onset/vowel draws differ between the causal streaming
+# sequencer and the offline batch one (different VAD timing shifts which
+# RNG draws land where), so how bad any single overshoot gets varies
+# per-run. A causal per-sample slew-rate limiter keeps worst-case jumps
+# within the range the offline reference itself exhibits, without
+# audibly touching normal-level output.
+MAX_SLEW = 0.09           # max sample-to-sample output change
+
+
+def _slew_limit(x: np.ndarray, max_step: float, prev: float):
+    """Causal slew-rate limiter. Returns (limited, new_prev)."""
+    if x.size == 0:
+        return x, prev
+    y = x.astype(np.float64).copy()
+    p = prev
+    for i in range(y.shape[0]):
+        lo = p - max_step
+        hi = p + max_step
+        if y[i] > hi:
+            y[i] = hi
+        elif y[i] < lo:
+            y[i] = lo
+        p = y[i]
+    return y.astype(np.float32), p
+
 
 def _smootherstep(z):
     q = np.clip(z, 0.0, 1.0)
@@ -274,6 +311,9 @@ class Minionese:
         self._out_ow = np.zeros(self.N, dtype=np.float64)
 
         self._gsm = 1.0
+
+        # Output safety net (see `MAX_SLEW` above).
+        self._slew_prev = 0.0
 
         # Causal VAD state.
         self._vad_ring = np.zeros(self._vad_kv, dtype=np.float64)
@@ -466,4 +506,5 @@ class Minionese:
             out = np.zeros(0, dtype=np.float32)
 
         np.nan_to_num(out, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        out, self._slew_prev = _slew_limit(out, MAX_SLEW, self._slew_prev)
         return out
