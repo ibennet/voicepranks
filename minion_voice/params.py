@@ -69,6 +69,9 @@ PARAM_SPECS = [
         needs_reset=True,
     ),
     ParamSpec("minionese.max_slew", "minionese", "Max output slew", "float", 0.02, 1.0, 0.01, minionese_mod.MAX_SLEW),
+    ParamSpec("minionese.floor", "minionese", "Gate floor", "float", 0.0, 1.0, 0.05, minionese_mod.FLOOR),
+    ParamSpec("minionese.resid_f", "minionese", "Residual mix", "float", 0.0, 1.0, 0.05, minionese_mod.RESID_F),
+    ParamSpec("minionese.vad_thresh", "minionese", "VAD threshold", "float", 0.0, 0.5, 0.01, minionese_mod.VAD_REL_THRESH),
 
     # -- pitch engine (advanced, shared WSOLA implementation) -------------
     ParamSpec("pitch.frame", "pitch", "WSOLA frame size", "int", 256, 4096, 64, 1024, needs_reset=True),
@@ -146,6 +149,18 @@ def build_effect_registry(effect: MinionEffect) -> Dict[str, ParamHandlers]:
         "minionese.max_slew": ParamHandlers(
             get=lambda: m.max_slew,
             set=lambda v: m.set_max_slew(float(v)),
+        ),
+        "minionese.floor": ParamHandlers(
+            get=lambda: m.floor,
+            set=lambda v: m.set_floor(float(v)),
+        ),
+        "minionese.resid_f": ParamHandlers(
+            get=lambda: m.resid_f,
+            set=lambda v: m.set_resid_f(float(v)),
+        ),
+        "minionese.vad_thresh": ParamHandlers(
+            get=lambda: m.vad_thresh,
+            set=lambda v: m.set_vad_thresh(float(v)),
         ),
         "pitch.frame": ParamHandlers(
             get=lambda: pitch.L,

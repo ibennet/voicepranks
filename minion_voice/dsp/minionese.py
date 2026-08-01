@@ -282,6 +282,9 @@ class Minionese:
         self.shuffle_k = 5  # number of vowel candidates (len(VOW))
         self.fade_ms = ATK * SYLL_MS  # syllable attack/release time, ms
         self.max_slew = MAX_SLEW
+        self.floor = FLOOR          # inter-syllable gate floor (0..1)
+        self.resid_f = RESID_F      # original-excitation residual mix
+        self.vad_thresh = VAD_REL_THRESH  # VAD gate: fraction of adaptive peak
 
         self.SYLL = max(1, int(self.chunk_ms / 1000.0 * self.sample_rate))
         self.dur = self.SYLL / self.sample_rate
@@ -337,6 +340,27 @@ class Minionese:
     def set_max_slew(self, max_slew: float) -> None:
         """Output slew-rate ceiling; no rebuild needed."""
         self.max_slew = float(max_slew)
+
+    def set_floor(self, floor: float) -> None:
+        """Inter-syllable gate floor (0..1). Lower -> the gate closes
+        harder between syllables (quieter gaps, less continuous drone),
+        higher -> a more connected babble. No rebuild needed."""
+        self.floor = min(max(float(floor), 0.0), 1.0)
+
+    def set_resid_f(self, resid_f: float) -> None:
+        """Mix of the *original* excitation residual kept under the
+        synthetic vowel formants (0..1). Lower -> the synthetic vowels
+        dominate (less of the real speech bleeds through, so it reads as
+        babble rather than intelligible words), higher -> more of the
+        source timbre/consonants survive. No rebuild needed."""
+        self.resid_f = min(max(float(resid_f), 0.0), 1.0)
+
+    def set_vad_thresh(self, vad_thresh: float) -> None:
+        """Voice-activity gate threshold as a fraction of the adaptive
+        running peak. Higher -> only louder speech triggers syllable
+        synthesis (background noise during pauses stays silent), lower ->
+        the gate opens more easily. No rebuild needed."""
+        self.vad_thresh = max(float(vad_thresh), 0.0)
 
     def reset(self) -> None:
         self._pitch.reset()
@@ -398,7 +422,7 @@ class Minionese:
         # smoothing damps transient peaks, which would otherwise drag the
         # adaptive threshold down and make the gate stricter than intended.
         self._vad_peak = max(rms, self._vad_peak * VAD_PEAK_DECAY)
-        threshold = max(VAD_REL_THRESH * self._vad_peak, VAD_ABS_FLOOR)
+        threshold = max(self.vad_thresh * self._vad_peak, VAD_ABS_FLOOR)
         vad = smoothed > threshold
 
         self._vad_hist.append(bool(vad))
@@ -475,7 +499,7 @@ class Minionese:
             return
 
         fade_frac = min(max((self.fade_ms / 1000.0) / max(self.dur, 1e-9), 0.01), 0.9)
-        gate = FLOOR + (1.0 - FLOOR) * _smootherstep(u / fade_frac) * _smootherstep((1.0 - u) / fade_frac)
+        gate = self.floor + (1.0 - self.floor) * _smootherstep(u / fade_frac) * _smootherstep((1.0 - u) / fade_frac)
         cur_f = VOW[self._vw_cur]
         if self._nasal_cur and dt < 0.028:
             mm = _smootherstep(dt / 0.028)
@@ -495,7 +519,7 @@ class Minionese:
         c = np.fft.irfft(logm)
         c[Q_LIFTER: len(c) - Q_LIFTER] = 0.0
         env = np.fft.rfft(c).real
-        resid = (logm - env) * RESID_F
+        resid = (logm - env) * self.resid_f
 
         delta = np.clip((self._venv(formants) + resid) - logm, -3.0, CLAMP)
         fo = np.fft.irfft(np.exp(logm + delta) * np.exp(1j * ph), self.N)

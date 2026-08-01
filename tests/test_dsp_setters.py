@@ -182,6 +182,30 @@ def test_minionese_set_max_slew_bounds_sample_to_sample_delta():
         assert max_delta <= 0.01 + 1e-6, f"slew limiter should bound deltas to ~0.01, got {max_delta}"
 
 
+def test_minionese_set_floor_changes_output():
+    default_out = _minionese_out()
+    changed_out = _minionese_out(configure=lambda m: m.set_floor(0.0))
+    _assert_differs(default_out, changed_out)
+
+
+def test_minionese_set_resid_f_changes_output():
+    default_out = _minionese_out()
+    changed_out = _minionese_out(configure=lambda m: m.set_resid_f(0.0))
+    _assert_differs(default_out, changed_out)
+
+
+def test_minionese_set_vad_thresh_gates_output():
+    # A constant-amplitude tone sits at ~1x the adaptive VAD peak, so only a
+    # threshold above 1x gates it -- pushing past the UI range proves the
+    # knob is wired into the gate (its real use is silencing quieter-than-
+    # peak passages like pauses/background noise).
+    default_out = _minionese_out()
+    gated_out = _minionese_out(configure=lambda m: m.set_vad_thresh(2.0))
+    _assert_differs(default_out, gated_out)
+    # With everything gated, the synthesized output collapses to near-silence.
+    assert float(np.max(np.abs(gated_out))) < float(np.max(np.abs(default_out)))
+
+
 # -- PitchShifter --------------------------------------------------------
 
 
