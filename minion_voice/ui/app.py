@@ -17,7 +17,8 @@ from tkinter import ttk
 from typing import Dict, List, Optional, Tuple
 
 from .. import presets as presets_mod
-from ..audio.devices import default_input_device, list_input_devices, list_output_devices
+from .. import settings as settings_mod
+from ..audio.devices import list_input_devices, list_output_devices
 from ..audio.engine import VoiceEngine
 from ..control_server import ControlServer
 from ..params import PARAM_SPECS, ParamSpec
@@ -34,9 +35,18 @@ GROUP_LABELS = {
 }
 GROUP_ORDER = ["global", "effect", "minionese", "shuffle", "pitch", "io"]
 
-# These are already covered by the dedicated device combos below, so they
-# are left out of the generated grid to avoid two controls for one param.
-_SKIP_PARAM_NAMES = {"enabled", "io.input_device", "io.output_device", "monitor"}
+# Params handled by dedicated controls (the Settings dialog device pickers,
+# the Turn On button, the Live monitor checkbox), so they are left out of the
+# generated grid to avoid two controls for one param.
+_SKIP_PARAM_NAMES = {
+    "enabled",
+    "monitor",
+    "io.input_device",
+    "io.output_device",
+    "io.playback_device",
+}
+
+_PRESET_NONE = "None"
 
 
 class MinionVoiceApp:
@@ -58,8 +68,15 @@ class MinionVoiceApp:
             url = self.control_server.start()
             sys.stderr.write(f"[minion_voice] control API listening at {url}\n")
 
+        # Device lists + persisted device selection (see settings.py). Loaded
+        # before the widgets so the Settings dialog and engine start with the
+        # saved devices.
+        self._input_devices: List[Tuple[int, str]] = []
+        self._output_devices: List[Tuple[int, str]] = []
+        self.settings: Dict = settings_mod.load()
+        self._load_devices_and_apply_settings()
+
         self._build_widgets()
-        self._populate_devices()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._refresh_status()
 
@@ -70,31 +87,33 @@ class MinionVoiceApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(5, weight=1)
-        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(3, weight=1)
+        frame.columnconfigure(0, weight=1)
 
-        self.toggle_button = ttk.Button(frame, text="Turn On", command=self._on_toggle)
-        self.toggle_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        # -- top bar: Turn On | Settings… | Preset dropdown ------------------
+        top = ttk.Frame(frame)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.toggle_button = ttk.Button(top, text="Turn On", command=self._on_toggle)
+        self.toggle_button.pack(side="left")
+        ttk.Button(top, text="Settings…", command=self._open_settings).pack(side="left", padx=(6, 0))
+        ttk.Label(top, text="Preset:").pack(side="left", padx=(16, 4))
+        self.preset_var = tk.StringVar(value=_PRESET_NONE)
+        preset_values = [_PRESET_NONE] + [n.title() for n in presets_mod.preset_names()]
+        self.preset_combo = ttk.Combobox(
+            top, textvariable=self.preset_var, values=preset_values, state="readonly", width=14
+        )
+        self.preset_combo.pack(side="left")
+        self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
-        ttk.Label(frame, text="Input device").grid(row=1, column=0, sticky="w")
-        self.input_var = tk.StringVar()
-        self.input_combo = ttk.Combobox(frame, textvariable=self.input_var, state="readonly")
-        self.input_combo.grid(row=1, column=1, sticky="ew", pady=4)
-        self.input_combo.bind("<<ComboboxSelected>>", self._on_input_device_change)
+        self._build_recorder_row(frame, row=1)
 
-        ttk.Label(frame, text="Output device").grid(row=2, column=0, sticky="w")
-        self.output_var = tk.StringVar()
-        self.output_combo = ttk.Combobox(frame, textvariable=self.output_var, state="readonly")
-        self.output_combo.grid(row=2, column=1, sticky="ew", pady=4)
-        self.output_combo.bind("<<ComboboxSelected>>", self._on_output_device_change)
+        ttk.Label(frame, text="Parameters (click a section to expand)").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
 
-        self._build_preset_row(frame, row=3)
-        self._build_recorder_row(frame, row=4)
-
-        # Scrollable area holding one generated control per PARAM_SPECS
-        # entry, grouped by `spec.group`.
+        # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(4, 8))
+        scroll_container.grid(row=3, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -109,23 +128,12 @@ class MinionVoiceApp:
             "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.create_window((0, 0), window=self._param_grid, anchor="nw")
-        self._param_grid.columnconfigure(1, weight=1)
+        self._param_grid.columnconfigure(0, weight=1)
 
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
-
-    def _build_preset_row(self, frame: ttk.Frame, row: int) -> None:
-        preset_frame = ttk.Frame(frame)
-        preset_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        ttk.Label(preset_frame, text="Preset:").pack(side="left", padx=(0, 6))
-        for name in presets_mod.preset_names():
-            ttk.Button(
-                preset_frame,
-                text=name.title(),
-                command=lambda n=name: self._on_apply_preset(n),
-            ).pack(side="left", padx=4)
+        self.status_label.grid(row=4, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -157,18 +165,56 @@ class MinionVoiceApp:
                 continue
             groups.setdefault(spec.group, []).append(spec)
 
+        # One collapsible section per group: a clickable header toggles a body
+        # frame of that group's controls. All collapsed by default.
+        self._group_bodies: Dict[str, ttk.Frame] = {}
+        self._group_headers: Dict[str, ttk.Label] = {}
+        self._group_expanded: Dict[str, bool] = {}
+
         row = 0
         for group in GROUP_ORDER:
             specs = groups.get(group)
             if not specs:
                 continue
-            header = ttk.Label(parent, text=GROUP_LABELS.get(group, group))
+
+            header = ttk.Label(parent, text="", cursor="hand2")
             header.configure(font=("TkDefaultFont", 10, "bold"))
-            header.grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 2))
+            header.grid(row=row, column=0, sticky="w", pady=(8, 2))
+            header.bind("<Button-1>", lambda _e, g=group: self._toggle_group(g))
             row += 1
-            for spec in specs:
-                self._build_one_control(parent, spec, row)
-                row += 1
+
+            body = ttk.Frame(parent)
+            body.grid(row=row, column=0, sticky="ew")
+            body.columnconfigure(1, weight=1)
+            body.grid_remove()  # collapsed by default
+            row += 1
+
+            for brow, spec in enumerate(specs):
+                self._build_one_control(body, spec, brow)
+
+            self._group_bodies[group] = body
+            self._group_headers[group] = header
+            self._group_expanded[group] = False
+            self._update_group_header(group)
+
+    def _group_header_text(self, group: str, expanded: bool) -> str:
+        arrow = "▾" if expanded else "▸"  # ▾ expanded / ▸ collapsed
+        return f"{arrow}  {GROUP_LABELS.get(group, group)}"
+
+    def _update_group_header(self, group: str) -> None:
+        self._group_headers[group].config(
+            text=self._group_header_text(group, self._group_expanded[group])
+        )
+
+    def _toggle_group(self, group: str) -> None:
+        expanded = not self._group_expanded[group]
+        self._group_expanded[group] = expanded
+        body = self._group_bodies[group]
+        if expanded:
+            body.grid()
+        else:
+            body.grid_remove()
+        self._update_group_header(group)
 
     def _build_one_control(self, parent: ttk.Frame, spec: ParamSpec, row: int) -> None:
         ttk.Label(parent, text=spec.label).grid(row=row, column=0, sticky="w", padx=(4, 4))
@@ -204,65 +250,132 @@ class MinionVoiceApp:
             return str(int(round(float(value))))
         return f"{float(value):.3g}"
 
-    def _populate_devices(self) -> None:
-        self._input_devices: List[Tuple[int, str]] = []
-        self._output_devices: List[Tuple[int, str]] = []
+    # -- devices + settings ------------------------------------------------
 
+    def _load_devices_and_apply_settings(self) -> None:
+        """List devices, resolve the persisted device selection, and apply it
+        to the engine (before it starts)."""
         try:
             self._input_devices = list_input_devices()
-            self.input_combo["values"] = [f"{idx}: {name}" for idx, name in self._input_devices]
-            try:
-                default_idx = default_input_device()
-            except Exception:
-                default_idx = None
-            for i, (idx, _name) in enumerate(self._input_devices):
-                if idx == default_idx:
-                    self.input_combo.current(i)
-                    break
-            else:
-                if self._input_devices:
-                    self.input_combo.current(0)
         except Exception as exc:
             self.error_message = f"Could not list input devices: {exc}"
-
         try:
             self._output_devices = list_output_devices()
-            self.output_combo["values"] = [f"{idx}: {name}" for idx, name in self._output_devices]
-
-            virtual_idx = None
-            try:
-                from ..audio.devices import find_virtual_output
-                virtual_idx = find_virtual_output()
-            except RuntimeError as exc:
-                self.error_message = str(exc)
-
-            for i, (idx, _name) in enumerate(self._output_devices):
-                if idx == virtual_idx:
-                    self.output_combo.current(i)
-                    break
-            else:
-                if self._output_devices:
-                    self.output_combo.current(0)
         except Exception as exc:
             self.error_message = f"Could not list output devices: {exc}"
 
-    def _selected_device_index(self, combo: ttk.Combobox) -> Optional[int]:
-        value = combo.get()
-        if not value:
+        resolved = settings_mod.resolve_all(self.settings, self._input_devices, self._output_devices)
+        # Input/output feed the recording/processing chain; playback is the
+        # listening device (Play button + live monitor). Unset -> engine
+        # defaults (auto virtual cable for output, system default elsewhere).
+        if resolved["input_device"] is not None:
+            self.engine.input_device = resolved["input_device"]
+        if resolved["output_device"] is not None:
+            self.engine.output_device = resolved["output_device"]
+        self.engine.set_playback_device(resolved["playback_device"])
+
+    def _device_name(self, devices: List[Tuple[int, str]], index: Optional[int]) -> Optional[str]:
+        if index is None:
             return None
+        for idx, name in devices:
+            if idx == index:
+                return name
+        return None
+
+    def _open_settings(self) -> None:
+        """Modal dialog to pick the three audio devices; persisted on Save."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Settings — audio devices")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        body = ttk.Frame(dlg, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+
+        def combo_for(devices, current_idx):
+            values = ["(default)"] + [f"{idx}: {name}" for idx, name in devices]
+            var = tk.StringVar()
+            cb = ttk.Combobox(body, textvariable=var, values=values, state="readonly", width=34)
+            sel = 0
+            for i, (idx, _name) in enumerate(devices):
+                if idx == current_idx:
+                    sel = i + 1
+                    break
+            cb.current(sel)
+            return cb
+
+        rows = [
+            ("Input mic (record from)", self._input_devices, self.engine.input_device),
+            ("Output mic (to other apps)", self._output_devices, self.engine.output_device),
+            ("Output playback (listen)", self._output_devices, self.engine.playback_device),
+        ]
+        combos = {}
+        for r, (label, devices, current) in enumerate(rows):
+            ttk.Label(body, text=label).grid(row=r, column=0, sticky="w", pady=4, padx=(0, 8))
+            cb = combo_for(devices, current)
+            cb.grid(row=r, column=1, sticky="ew", pady=4)
+            combos[label] = (cb, devices)
+
+        ttk.Label(
+            body,
+            text="Input/Output feed recording; Playback is only for listening.\n"
+            "Saved to ~/.minion_voice/settings.json.",
+            foreground="#666",
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 4))
+
+        btns = ttk.Frame(body)
+        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(8, 0))
+
+        def parse(cb, devices):
+            i = cb.current()
+            if i <= 0:
+                return None
+            return devices[i - 1][0]
+
+        def on_save():
+            in_idx = parse(*combos["Input mic (record from)"])
+            out_idx = parse(*combos["Output mic (to other apps)"])
+            play_idx = parse(*combos["Output playback (listen)"])
+            self._apply_and_save_devices(in_idx, out_idx, play_idx)
+            dlg.destroy()
+
+        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(btns, text="Save", command=on_save).pack(side="right")
+
+        dlg.grab_set()
+        dlg.focus_set()
+
+    def _apply_and_save_devices(
+        self, in_idx: Optional[int], out_idx: Optional[int], play_idx: Optional[int]
+    ) -> None:
+        """Apply the three chosen devices to the engine and persist them."""
         try:
-            return int(value.split(":", 1)[0])
-        except (ValueError, IndexError):
-            return None
+            # set_param handles a running engine's stream restart; playback is
+            # applied directly (re-opens the monitor stream if active).
+            self.engine.set_param("io.input_device", -1 if in_idx is None else in_idx)
+            self.engine.set_param("io.output_device", -1 if out_idx is None else out_idx)
+            self.engine.set_playback_device(play_idx)
+        except Exception as exc:
+            self.error_message = f"Failed to apply devices: {exc}"
+
+        self.settings = settings_mod.update_devices(
+            self.settings,
+            input_device=settings_mod.device_entry(in_idx, self._device_name(self._input_devices, in_idx)),
+            output_device=settings_mod.device_entry(out_idx, self._device_name(self._output_devices, out_idx)),
+            playback_device=settings_mod.device_entry(play_idx, self._device_name(self._output_devices, play_idx)),
+        )
+        try:
+            settings_mod.save(self.settings)
+        except Exception as exc:
+            self.error_message = f"Failed to save settings: {exc}"
 
     # -- event handlers ----------------------------------------------------
 
     def _on_toggle(self) -> None:
         if not self.engine.running:
-            input_idx = self._selected_device_index(self.input_combo)
-            output_idx = self._selected_device_index(self.output_combo)
             try:
-                self.engine.start(input_device=input_idx, output_device=output_idx)
+                self.engine.start()
             except RuntimeError as exc:
                 self.error_message = str(exc)
                 self._refresh_status()
@@ -275,23 +388,14 @@ class MinionVoiceApp:
         self.engine.set_enabled(not self.engine.enabled)
         self.toggle_button.config(text="Turn Off" if self.engine.enabled else "Turn On")
 
-    def _on_input_device_change(self, _evt) -> None:
-        idx = self._selected_device_index(self.input_combo)
-        if idx is None:
-            return
+    def _on_preset_selected(self, _evt) -> None:
+        value = self.preset_var.get()
+        if value == _PRESET_NONE:
+            return  # "None" is a neutral/custom state -- changes nothing.
         try:
-            self.engine.set_param("io.input_device", idx)
+            self.engine.apply_preset(value.lower())
         except Exception as exc:
-            self.error_message = f"Failed to switch input device: {exc}"
-
-    def _on_output_device_change(self, _evt) -> None:
-        idx = self._selected_device_index(self.output_combo)
-        if idx is None:
-            return
-        try:
-            self.engine.set_param("io.output_device", idx)
-        except Exception as exc:
-            self.error_message = f"Failed to switch output device: {exc}"
+            self.error_message = f"Apply preset '{value}' failed: {exc}"
 
     def _on_param_slider(self, spec: ParamSpec, value_str: str) -> None:
         if self._suppress_commands:
@@ -327,10 +431,8 @@ class MinionVoiceApp:
         # re-render. Recording still captures the DRY signal, so re-render
         # with tweaked params keeps working.
         if not self.engine.running:
-            input_idx = self._selected_device_index(self.input_combo)
-            output_idx = self._selected_device_index(self.output_combo)
             try:
-                self.engine.start(input_device=input_idx, output_device=output_idx)
+                self.engine.start()
             except Exception as exc:
                 self.error_message = f"Could not start audio for recording: {exc}"
                 return
@@ -344,14 +446,6 @@ class MinionVoiceApp:
 
     def _on_monitor_toggle(self) -> None:
         self.engine.set_param("monitor", self.monitor_var.get())
-
-    def _on_apply_preset(self, name: str) -> None:
-        # Applies the preset's sound-character params; the status poll then
-        # re-syncs every affected slider to the new values.
-        try:
-            self.engine.apply_preset(name)
-        except Exception as exc:
-            self.error_message = f"Apply preset '{name}' failed: {exc}"
 
     def _on_play(self) -> None:
         # Replay the live processed take exactly as it was captured -- no

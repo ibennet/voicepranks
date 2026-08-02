@@ -120,9 +120,11 @@ class VoiceEngine:
         # (speakers/headphones) so the user can HEAR the processed effect in
         # real time while the main output feeds the virtual cable. Fed the
         # same processed audio via its own ring so the two sinks don't fight
-        # over one buffer. `monitor_device=None` -> system default output.
+        # over one buffer. The listening/playback device is also what the
+        # Play button routes takes to. `playback_device=None` -> system
+        # default output.
         self.monitor_enabled = False
-        self.monitor_device: Optional[int] = None
+        self.playback_device: Optional[int] = None
         self.monitor_stream: Optional[sd.OutputStream] = None
         self.monitor_ring = _RingBuffer(ring_capacity)
         self._monitor_out_channels = 1
@@ -168,6 +170,13 @@ class VoiceEngine:
         value is applied immediately instead of waiting for a callback
         that will never come.
         """
+        if name == "io.playback_device":
+            # The listening device manages its own (monitor) stream and must
+            # NOT restart the main input/output streams. Apply immediately on
+            # the caller thread (opening a stream from the audio callback is
+            # unsafe), whether running or not.
+            self.set_playback_device(None if int(value) < 0 else int(value))
+            return
         if name.startswith("io."):
             self.set_io_param(name, value)
             return
@@ -330,10 +339,11 @@ class VoiceEngine:
         else:
             self._close_monitor_stream()
 
-    def set_monitor_device(self, device: Optional[int]) -> None:
-        """Pick the output device the live monitor plays to (None = system
-        default). Re-opens the monitor stream if it's currently active."""
-        self.monitor_device = None if device is None else int(device)
+    def set_playback_device(self, device: Optional[int]) -> None:
+        """Pick the device used for *listening* -- both the live monitor and
+        the Play button route here (None = system default output). Re-opens
+        the monitor stream if it's currently active."""
+        self.playback_device = None if device is None else int(device)
         if self.running and self.monitor_enabled:
             self._close_monitor_stream()
             self._open_monitor_stream()
@@ -342,7 +352,7 @@ class VoiceEngine:
         if self.monitor_stream is not None:
             return
         try:
-            device = self.monitor_device  # None -> system default output
+            device = self.playback_device  # None -> system default output
             # `query_devices(kind='output')` resolves the system default when
             # no explicit device is given, without assuming the shape of
             # `sd.default.device`.
@@ -571,8 +581,10 @@ class VoiceEngine:
         return buf
 
     def play(self, which: str = "live") -> None:
+        # Route playback to the listening device (speakers/headphones), NOT
+        # the virtual cable -- Play is for hearing the take yourself.
         buf = self._get_take(which)
-        sd.play(buf, self.sample_rate, device=self.output_device)
+        sd.play(buf, self.sample_rate, device=self.playback_device)
 
     def save(self, path: str, which: str = "live") -> None:
         buf = self._get_take(which)

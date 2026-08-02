@@ -95,7 +95,7 @@ PARAM_SPECS = [
     ParamSpec("io.ring_ms", "io", "Output ring buffer (ms)", "float", 50.0, 1000.0, 10.0, 200.0, needs_reset=True),
     ParamSpec("io.input_device", "io", "Input device", "int", -1, 999, 1, -1, needs_reset=True),
     ParamSpec("io.output_device", "io", "Output device", "int", -1, 999, 1, -1, needs_reset=True),
-    ParamSpec("io.monitor_device", "io", "Monitor device (-1=default)", "int", -1, 999, 1, -1),
+    ParamSpec("io.playback_device", "io", "Playback device (-1=default)", "int", -1, 999, 1, -1),
 ]
 
 PARAM_SPECS_BY_NAME: Dict[str, ParamSpec] = {spec.name: spec for spec in PARAM_SPECS}
@@ -272,9 +272,9 @@ def build_engine_registry(engine) -> Dict[str, ParamHandlers]:
             get=lambda: -1 if engine.output_device is None else int(engine.output_device),
             set=lambda v: engine.set_io_param("io.output_device", None if int(v) < 0 else int(v)),
         ),
-        "io.monitor_device": ParamHandlers(
-            get=lambda: -1 if engine.monitor_device is None else int(engine.monitor_device),
-            set=lambda v: engine.set_monitor_device(None if int(v) < 0 else int(v)),
+        "io.playback_device": ParamHandlers(
+            get=lambda: -1 if engine.playback_device is None else int(engine.playback_device),
+            set=lambda v: engine.set_playback_device(None if int(v) < 0 else int(v)),
         ),
     }
     reg.update(build_effect_registry(engine.effect))

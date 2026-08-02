@@ -39,16 +39,29 @@ pip install -r requirements.txt
 python -m minion_voice
 ```
 
-Toggle the effect on/off, pick your input device and the detected virtual
-output device, and tune every DSP knob (pitch amount, EQ, Minionese
-gibberish-mode params, WSOLA pitch-engine internals, I/O) from a scrollable
-grid of sliders/checkboxes -- one control per entry in `params.PARAM_SPECS`,
-so nothing is hidden behind a hardcoded module constant anymore. Hit
-**Record** and the effect runs in real time while it captures the processed
-output; **Play** replays that live take verbatim (no re-render). Tick **Live
-monitor** to also hear it on your speakers while recording. **Re-render &
-Play** is a secondary A/B flow: it re-runs the *dry* mic through a fresh
-effect with whatever settings are currently dialed in.
+Toggle the effect on/off, choose a **Preset** from the dropdown, and open
+**Settings…** to pick your three audio devices (see below). Every DSP knob
+(pitch amount, EQ, Minionese gibberish-mode params, WSOLA pitch-engine
+internals, I/O) lives in collapsible **parameter sections** (collapsed by
+default; click a section header to expand) -- one control per entry in
+`params.PARAM_SPECS`, so nothing is hidden behind a hardcoded module constant
+anymore. Hit **Record** and the effect runs in real time while it captures the
+processed output; **Play** replays that live take verbatim (no re-render).
+Tick **Live monitor** to also hear it on your speakers while recording.
+**Re-render & Play** is a secondary A/B flow: it re-runs the *dry* mic through
+a fresh effect with whatever settings are currently dialed in.
+
+### Audio devices (Settings…)
+
+Three devices, configured in the **Settings** dialog and saved to
+`~/.minion_voice/settings.json` (editable outside the app):
+
+- **Input mic** — the physical microphone to record/process from.
+- **Output mic** — the virtual cable other apps hear as a microphone
+  (VB-CABLE / BlackHole); where processed audio is routed.
+- **Output playback** — your speakers/headphones, used *only* for listening:
+  the **Play** button and the **Live monitor** route here, never the virtual
+  cable.
 
 The GUI also starts a small local HTTP control API by default (see below),
 so the same params can be tuned live from the command line or a script
