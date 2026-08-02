@@ -65,8 +65,12 @@ FADE_MS = 25.0         # equal-power crossfade between reordered chunks, ms
 
 # Final safety net (not normally engaged now that the chain is time-domain
 # and crossfaded): a causal per-sample slew clamp that only catches gross
-# discontinuities. Set high enough not to touch normal bright speech.
-MAX_SLEW = 0.25        # max sample-to-sample output change
+# discontinuities. Must sit ABOVE normal bright-speech transients -- a low
+# ceiling clamps legitimate fast slopes (fricatives, pitched-up highs) into
+# linear ramps, and those corners read as broadband crackle/static. At 0.25
+# it fired ~20x/sec on ordinary speech; 1.0 passes real audio and only trips
+# on near-full-scale glitches.
+MAX_SLEW = 1.0         # max sample-to-sample output change
 
 
 def _slew_limit(x: np.ndarray, max_step: float, prev: float):

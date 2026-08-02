@@ -40,7 +40,7 @@ PRESETS: Dict[str, Dict] = {
         "shuffle.shuffle_k": 6,
         "shuffle.fade_ms": 18.0,
         "shuffle.reverse_prob": 0.5,
-        "shuffle.max_slew": 0.35,
+        "shuffle.max_slew": 1.0,
     },
     # Connected / pitched / lilting -- no scramble, so speech stays flowing;
     # a moderate pitch-up plus sing-song wobble reads as "Minion".
@@ -53,7 +53,7 @@ PRESETS: Dict[str, Dict] = {
         "shuffle.shuffle_k": 1,
         "shuffle.fade_ms": 25.0,
         "shuffle.reverse_prob": 0.0,
-        "shuffle.max_slew": 0.25,
+        "shuffle.max_slew": 1.0,
     },
 }
 
