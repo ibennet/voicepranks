@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 SETTINGS_DIR = Path.home() / ".minion_voice"
 SETTINGS_PATH = SETTINGS_DIR / "settings.json"

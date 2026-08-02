@@ -47,8 +47,9 @@ from .audio.devices import list_input_devices, list_output_devices
 _WEBUI_INDEX = Path(__file__).parent / "webui" / "index.html"
 
 
-def _spec_to_dict(spec: params_mod.ParamSpec) -> dict:
-    return dataclasses.asdict(spec)
+# PARAM_SPECS are frozen and never change, so serialize them once at import
+# rather than deep-copying every spec on each /api/state request.
+_SPECS_JSON = [dataclasses.asdict(spec) for spec in params_mod.PARAM_SPECS]
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -176,7 +177,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_state(self) -> None:
         self._send_json(
             {
-                "specs": [_spec_to_dict(s) for s in params_mod.PARAM_SPECS],
+                "specs": _SPECS_JSON,
                 "values": self.engine.snapshot(),
                 "status": self.engine.get_status(),
             }

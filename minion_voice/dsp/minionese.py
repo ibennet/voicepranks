@@ -174,7 +174,12 @@ def _slew_limit(x: np.ndarray, max_step: float, prev: float):
     """Causal slew-rate limiter. Returns (limited, new_prev)."""
     if x.size == 0:
         return x, prev
-    y = x.astype(np.float64).copy()
+    # Fast path: if no sample-to-sample step (including from `prev`) exceeds
+    # the ceiling, no clamp can fire, so skip the per-sample loop entirely.
+    # This is the common case -- the limiter is a rare-glitch safety net.
+    if abs(float(x[0]) - prev) <= max_step and np.all(np.abs(np.diff(x)) <= max_step):
+        return x.astype(np.float32, copy=False), float(x[-1])
+    y = x.astype(np.float64)
     p = prev
     for i in range(y.shape[0]):
         lo = p - max_step

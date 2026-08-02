@@ -108,6 +108,11 @@ class VoiceEngine:
 
         self.enabled = False
         self._manual_intensity: Optional[float] = None
+        # Last intensity pushed to the effect from the callback, so a constant
+        # intensity (e.g. after the ramp settles) doesn't re-derive every
+        # sub-engine's coefficients every block. Param changes go through their
+        # own setters, so they still apply immediately regardless of this.
+        self._last_applied_intensity: Optional[float] = None
 
         self.input_device: Optional[int] = None
         self.output_device: Optional[int] = None
@@ -127,7 +132,6 @@ class VoiceEngine:
         self.playback_device: Optional[int] = None
         self.monitor_stream: Optional[sd.OutputStream] = None
         self.monitor_ring = _RingBuffer(ring_capacity)
-        self._monitor_out_channels = 1
 
         # -- live param registry (single source of truth; see params.py) --
         self._registry = params.build_engine_registry(self)
@@ -283,7 +287,6 @@ class VoiceEngine:
 
         out_info = sd.query_devices(output_device)
         out_channels = max(1, int(out_info.get("max_output_channels", 1)))
-        self._out_channels = out_channels
 
         self.input_stream = sd.InputStream(
             device=input_device,
@@ -358,7 +361,6 @@ class VoiceEngine:
             # `sd.default.device`.
             info = sd.query_devices(device) if device is not None else sd.query_devices(kind="output")
             channels = max(1, int(info.get("max_output_channels", 1)))
-            self._monitor_out_channels = channels
             self.monitor_ring = _RingBuffer(self.ring.capacity)
             self._prime_ring_target(self.monitor_ring, self._cushion_ms())
             self.monitor_stream = sd.OutputStream(
@@ -390,7 +392,7 @@ class VoiceEngine:
             if channels == 1:
                 outdata[:, 0] = mono
             else:
-                outdata[:, :] = np.repeat(mono.reshape(-1, 1), channels, axis=1)
+                outdata[:, :] = mono[:, None]  # broadcast mono across channels (no temp)
         except Exception as exc:
             self.last_error = str(exc)
             outdata.fill(0.0)
@@ -426,13 +428,9 @@ class VoiceEngine:
         if b and self.running:
             self._prime_for_effect()
 
-    def _prime_ring(self, ms: float) -> None:
-        """Top the main output ring up to `ms` of buffered silence — a
-        startup / mode-switch cushion against the effect pipeline's latency."""
-        self._prime_ring_target(self.ring, ms)
-
     def _prime_ring_target(self, ring: "_RingBuffer", ms: float) -> None:
-        """Top an arbitrary ring up to `ms` of buffered silence."""
+        """Top a ring up to `ms` of buffered silence — a startup / mode-switch
+        cushion against the effect pipeline's latency."""
         target = int(self.sample_rate * ms / 1000.0)
         need = target - ring.count
         if need > 0:
@@ -451,18 +449,12 @@ class VoiceEngine:
             eff_latency = 0.0
         return eff_latency * 1.5 + 60.0
 
-    def _ensure_ring_capacity(self, ms: float) -> None:
-        """Grow the output ring so it can actually hold `ms` of cushion.
-        The ring drops oldest samples when full, so a cushion larger than
-        capacity would be silently truncated -> underruns. Growing on the
-        audio thread is safe here because `_RingBuffer` is only read/written
-        under its own lock and we swap in a pre-filled replacement."""
-        self.ring = self._grown_ring(self.ring, ms)
-
     def _grown_ring(self, ring: "_RingBuffer", ms: float) -> "_RingBuffer":
         """Return a ring with capacity for at least `ms`, carrying over any
         buffered audio and the cumulative counters. Returns `ring` unchanged
-        if it is already big enough."""
+        if it is already big enough. Growing on the audio thread is safe here
+        because `_RingBuffer` is only read/written under its own lock and we
+        swap in a pre-filled replacement."""
         target = int(self.sample_rate * ms / 1000.0)
         want_capacity = max(self.blocksize * 2, target + self.blocksize * 2)
         if want_capacity <= ring.capacity:
@@ -487,7 +479,7 @@ class VoiceEngine:
         cushion = self._cushion_ms()
         capacity_ms = cushion + self.blocksize / self.sample_rate * 1000.0
         self.ring = self._grown_ring(self.ring, capacity_ms)
-        self._prime_ring(cushion)
+        self._prime_ring_target(self.ring, cushion)
         if self.monitor_enabled and self.monitor_stream is not None:
             self.monitor_ring = self._grown_ring(self.monitor_ring, capacity_ms)
             self._prime_ring_target(self.monitor_ring, cushion)
@@ -623,7 +615,9 @@ class VoiceEngine:
 
             if self.enabled:
                 t = self._manual_intensity if self._manual_intensity is not None else self.ramp.current()
-                self.effect.set_intensity(t)
+                if t != self._last_applied_intensity:
+                    self.effect.set_intensity(t)
+                    self._last_applied_intensity = t
                 processed = self.effect.process(mono)
             else:
                 processed = mono
@@ -663,7 +657,7 @@ class VoiceEngine:
             if channels == 1:
                 outdata[:, 0] = mono
             else:
-                outdata[:, :] = np.repeat(mono.reshape(-1, 1), channels, axis=1)
+                outdata[:, :] = mono[:, None]  # broadcast mono across channels (no temp)
         except Exception as exc:
             self.last_error = str(exc)
             outdata.fill(0.0)

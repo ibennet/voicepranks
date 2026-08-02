@@ -37,7 +37,6 @@ class MinionEffect:
 
     def __init__(self, sample_rate: int, channels: int = 1) -> None:
         self.sample_rate = int(sample_rate)
-        self.channels = int(channels)
 
         # Instance copies of the class-level defaults above, so each
         # MinionEffect can be tuned independently without touching the

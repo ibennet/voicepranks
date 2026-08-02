@@ -42,6 +42,7 @@ from __future__ import annotations
 import numpy as np
 
 from .biquad import PeakingEQ
+from .minionese import _slew_limit
 from .pitch import PitchShifter
 
 # -- params (keep these easy to find/tweak) --------------------------------
@@ -83,23 +84,6 @@ FADE_MS = 25.0         # equal-power crossfade between reordered chunks, ms
 # it fired ~20x/sec on ordinary speech; 1.0 passes real audio and only trips
 # on near-full-scale glitches.
 MAX_SLEW = 1.0         # max sample-to-sample output change
-
-
-def _slew_limit(x: np.ndarray, max_step: float, prev: float):
-    """Causal slew-rate limiter. Returns (limited, new_prev)."""
-    if x.size == 0:
-        return x, prev
-    y = x.astype(np.float64).copy()
-    p = prev
-    for i in range(y.shape[0]):
-        lo = p - max_step
-        hi = p + max_step
-        if y[i] > hi:
-            y[i] = hi
-        elif y[i] < lo:
-            y[i] = lo
-        p = y[i]
-    return y.astype(np.float32), p
 
 
 class _PitchWobble:
@@ -227,7 +211,7 @@ class _ChunkShuffle:
 
     def _faded(self, g: np.ndarray) -> np.ndarray:
         """Window a (C + fade)-long chunk with fade-in/out at its edges."""
-        g = g.astype(np.float64).copy()
+        g = g.astype(np.float64)  # astype already returns a fresh writable array
         f = self.fade
         if f > 0 and g.shape[0] >= 2 * f:
             g[:f] *= self._ramp_up

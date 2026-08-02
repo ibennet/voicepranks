@@ -58,7 +58,6 @@ class MinionVoiceApp:
         self.engine = VoiceEngine()
         self.error_message: Optional[str] = None
 
-        self._slider_dragging = False  # legacy flag, kept for compat
         self._dragging: Dict[str, bool] = {}
         self._param_widgets: Dict[str, dict] = {}
         self._suppress_commands = False
@@ -467,7 +466,6 @@ class MinionVoiceApp:
     def _on_param_slider(self, spec: ParamSpec, value_str: str) -> None:
         if self._suppress_commands:
             return
-        self._slider_dragging = True
         try:
             value = float(value_str)
         except (TypeError, ValueError):
