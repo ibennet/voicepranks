@@ -165,33 +165,26 @@ class VoiceEngine:
     def set_param(self, name: str, value) -> None:
         """Set one live param by its dotted name (see `params.PARAM_SPECS`).
 
-        I/O params (`io.*`) restart the streams immediately (can't be
-        applied from inside the audio callback they'd be tearing down).
-        Everything else is stashed and applied at the top of the next
-        `_input_callback` while the engine is running, so DSP-stage
-        rebuilds never race the audio thread that's using them. If the
-        engine isn't running, there is no audio thread to race, so the
-        value is applied immediately instead of waiting for a callback
-        that will never come.
+        `io.*` params manage devices/streams (restart the main streams or
+        re-open the monitor stream), which must happen on the caller thread —
+        opening/tearing down a stream from inside the audio callback is unsafe.
+        So every `io.*` param is applied immediately via its registry handler
+        (which encodes the right action). Everything else is stashed and
+        applied at the top of the next `_input_callback` while the engine is
+        running, so DSP-stage rebuilds never race the audio thread using them;
+        when stopped, there is no audio thread to race, so it too is applied
+        immediately.
         """
-        if name == "io.playback_device":
-            # The listening device manages its own (monitor) stream and must
-            # NOT restart the main input/output streams. Apply immediately on
-            # the caller thread (opening a stream from the audio callback is
-            # unsafe), whether running or not.
-            self.set_playback_device(None if int(value) < 0 else int(value))
-            return
-        if name.startswith("io."):
-            self.set_io_param(name, value)
-            return
-        if self.running:
+        handlers = self._registry.get(name)
+        if handlers is None:
+            raise KeyError(f"unknown param: {name}")
+        spec = params.PARAM_SPECS_BY_NAME.get(name)
+        apply_now = (spec is not None and spec.group == "io") or not self.running
+        if apply_now:
+            handlers.set(value)
+        else:
             with self._param_lock:
                 self._pending[name] = value
-        else:
-            handlers = self._registry.get(name)
-            if handlers is None:
-                raise KeyError(f"unknown param: {name}")
-            handlers.set(value)
 
     def snapshot(self) -> dict:
         """Return the current value of every registered param."""
