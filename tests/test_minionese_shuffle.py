@@ -99,6 +99,34 @@ def test_wobble_does_not_add_broadband_static():
     assert hf < -60.0, f"wobble added broadband HF static ({hf:.1f} dB above 2 kHz)"
 
 
+def _band_energy(signal: np.ndarray, lo: float, hi: float, sample_rate: int = SAMPLE_RATE) -> float:
+    w = signal.astype(np.float64) * np.hanning(len(signal))
+    power = np.abs(np.fft.rfft(w)) ** 2
+    freqs = np.fft.rfftfreq(len(signal), d=1.0 / sample_rate)
+    return float(power[(freqs >= lo) & (freqs <= hi)].sum())
+
+
+def test_nasality_boosts_midrange_and_cuts_highs():
+    def run(nas: float):
+        m = MinioneseShuffle(SAMPLE_RATE, seed=0)
+        m.set_semitones(0.0)   # isolate the nasal EQ from the pitch shift
+        m.set_wobble_ms(0.0)   # ...and from FM smearing
+        m.set_shuffle_k(1)
+        m.set_reverse_prob(0.0)
+        m.set_nasality(nas)
+        m.set_intensity(1.0)
+        t = np.arange(int(SAMPLE_RATE * 2.0)) / SAMPLE_RATE
+        sig = (0.3 * (np.sin(2 * np.pi * 1200 * t) + np.sin(2 * np.pi * 3000 * t))).astype(np.float32)
+        out = _process_in_blocks(m, sig)
+        _assert_finite(out)
+        return _band_energy(out, 1100, 1300), _band_energy(out, 2900, 3100)
+
+    flat_mid, flat_hi = run(0.0)
+    nasal_mid, nasal_hi = run(0.8)
+    # Nasality lifts the ~1.2 kHz band relative to the ~3 kHz band.
+    assert (nasal_mid / nasal_hi) > (flat_mid / flat_hi) * 1.5
+
+
 def test_intensity_scales_pitch_to_transparent_at_zero():
     lo = _dominant_at_intensity(0.0)
     hi = _dominant_at_intensity(1.0)

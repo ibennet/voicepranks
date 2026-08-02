@@ -83,6 +83,7 @@ PARAM_SPECS = [
     ParamSpec("shuffle.shuffle_k", "shuffle", "Chunks per window", "int", 1, 8, 1, shuffle_mod.SHUFFLE_K, needs_reset=True),
     ParamSpec("shuffle.fade_ms", "shuffle", "Crossfade (ms)", "float", 0.0, 60.0, 1.0, shuffle_mod.FADE_MS, needs_reset=True),
     ParamSpec("shuffle.reverse_prob", "shuffle", "Reverse chunks (prob)", "float", 0.0, 1.0, 0.05, 0.0),
+    ParamSpec("shuffle.nasality", "shuffle", "Nasality", "float", 0.0, 1.0, 0.05, 0.0),
     ParamSpec("shuffle.max_slew", "shuffle", "Max output slew", "float", 0.02, 2.0, 0.01, shuffle_mod.MAX_SLEW),
 
     # -- pitch engine (advanced, shared WSOLA implementation) -------------
@@ -203,6 +204,10 @@ def build_effect_registry(effect: MinionEffect) -> Dict[str, ParamHandlers]:
         "shuffle.reverse_prob": ParamHandlers(
             get=lambda: sh.reverse_prob,
             set=lambda v: sh.set_reverse_prob(float(v)),
+        ),
+        "shuffle.nasality": ParamHandlers(
+            get=lambda: sh.nasality,
+            set=lambda v: sh.set_nasality(float(v)),
         ),
         "shuffle.max_slew": ParamHandlers(
             get=lambda: sh.max_slew,

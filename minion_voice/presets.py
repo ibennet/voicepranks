@@ -40,6 +40,7 @@ PRESETS: Dict[str, Dict] = {
         "shuffle.shuffle_k": 6,
         "shuffle.fade_ms": 18.0,
         "shuffle.reverse_prob": 0.5,
+        "shuffle.nasality": 0.0,
         "shuffle.max_slew": 1.0,
     },
     # Connected / pitched / lilting -- no scramble, so speech stays flowing;
@@ -53,6 +54,7 @@ PRESETS: Dict[str, Dict] = {
         "shuffle.shuffle_k": 1,
         "shuffle.fade_ms": 25.0,
         "shuffle.reverse_prob": 0.0,
+        "shuffle.nasality": 0.7,
         "shuffle.max_slew": 1.0,
     },
 }

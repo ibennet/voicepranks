@@ -41,11 +41,23 @@ from __future__ import annotations
 
 import numpy as np
 
+from .biquad import PeakingEQ
 from .pitch import PitchShifter
 
 # -- params (keep these easy to find/tweak) --------------------------------
 
 SEMITONES = 5.0        # base pitch-up amount
+
+# Nasal coloration: a honky midrange resonance (~1.2 kHz peak) plus a gentle
+# high cut (~3 kHz) gives the pinched "talking through the nose" timbre.
+# `nasality` (0..1) scales both, and it also rides intensity so it fades out
+# with the rest of the effect.
+NASAL_PEAK_HZ = 1200.0
+NASAL_PEAK_Q = 2.0
+NASAL_PEAK_MAX_DB = 10.0
+NASAL_CUT_HZ = 3000.0
+NASAL_CUT_Q = 1.0
+NASAL_CUT_MAX_DB = 6.0
 
 # Pitch wobble (the wandering minion melody).
 WOBBLE_MS = 4.0        # peak delay excursion, ms (bigger -> wider wobble)
@@ -298,6 +310,7 @@ class MinioneseShuffle:
         self.fade_ms = FADE_MS
         self.reverse_prob = 0.0
         self.max_slew = MAX_SLEW
+        self.nasality = 0.0
         self.intensity = 1.0
 
         self._pitch = PitchShifter(self.sample_rate)
@@ -306,7 +319,10 @@ class MinioneseShuffle:
             self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms,
             reverse_prob=self.reverse_prob, seed=seed,
         )
+        self._nasal_peak = PeakingEQ(self.sample_rate, NASAL_PEAK_HZ, NASAL_PEAK_Q, 0.0)
+        self._nasal_cut = PeakingEQ(self.sample_rate, NASAL_CUT_HZ, NASAL_CUT_Q, 0.0)
         self._apply_pitch()
+        self._apply_nasal()
 
         self._slew_prev = 0.0
 
@@ -326,11 +342,25 @@ class MinioneseShuffle:
         self._scramble.set_strength(self.intensity)
         self._scramble.set_reverse_prob(self.reverse_prob * self.intensity)
 
+    def _apply_nasal(self) -> None:
+        # Nasal coloration scales with both `nasality` and intensity, so it
+        # rides the ramp-in and vanishes at intensity 0.
+        g = self.nasality * self.intensity
+        self._nasal_peak.set_gain_db(NASAL_PEAK_MAX_DB * g)
+        self._nasal_cut.set_gain_db(-NASAL_CUT_MAX_DB * g)
+
     def set_intensity(self, t: float) -> None:
         self.intensity = min(max(float(t), 0.0), 1.0)
         self._apply_pitch()
         self._wobble.set_depth_scale(self.intensity)
         self._apply_scramble()
+        self._apply_nasal()
+
+    def set_nasality(self, n: float) -> None:
+        """Nasal (honky, pinched) coloration amount, 0..1. Adds a midrange
+        resonance + a high cut; scaled by intensity. No rebuild needed."""
+        self.nasality = min(max(float(n), 0.0), 1.0)
+        self._apply_nasal()
 
     def set_semitones(self, semitones: float) -> None:
         """Live-adjustable pitch-up amount; no rebuild needed."""
@@ -394,6 +424,8 @@ class MinioneseShuffle:
         self._pitch.reset()
         self._wobble.reset()
         self._scramble.reset()
+        self._nasal_peak.reset()
+        self._nasal_cut.reset()
         self._slew_prev = 0.0
 
     # -- processing --------------------------------------------------
@@ -406,6 +438,12 @@ class MinioneseShuffle:
         pitched = self._pitch.process(block)
         wobbled = self._wobble.process(pitched)
         out = self._scramble.process(wobbled)
+
+        # Nasal coloration (skipped entirely when nasality is off, to avoid the
+        # per-sample biquad cost; at intensity 0 the filters are flat anyway).
+        if self.nasality > 1e-6 and out.size:
+            out = self._nasal_peak.process(out)
+            out = self._nasal_cut.process(out)
 
         np.nan_to_num(out, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         out, self._slew_prev = _slew_limit(out, self.max_slew, self._slew_prev)
