@@ -53,3 +53,25 @@ def test_restart_ramp_without_duration_keeps_current():
     engine.restart_ramp()
     assert engine.ramp.duration_s == 3.0
     assert engine.ramp.current() < 0.05
+
+
+def test_reenable_without_ramp_reapplies_intensity():
+    # With no ramp, disabling sets the effect to intensity 0; re-enabling must
+    # restore full intensity even though the audio callback caches the last
+    # applied value (regression guard for the intensity-cache optimization).
+    import numpy as np
+
+    engine = VoiceEngine(sample_rate=48000, blocksize=256)
+    engine.ramp.set_duration(0.0)  # no ramp -> full intensity immediately
+    block = (0.1 * np.sin(2 * np.pi * 200 * np.arange(256) / 48000)).astype(np.float32).reshape(-1, 1)
+
+    engine.set_enabled(True)
+    engine._input_callback(block, 256, None, None)
+    assert engine.effect.intensity == 1.0
+
+    engine.set_enabled(False)
+    assert engine.effect.intensity == 0.0
+
+    engine.set_enabled(True)
+    engine._input_callback(block, 256, None, None)
+    assert engine.effect.intensity == 1.0  # restored, not stuck at 0

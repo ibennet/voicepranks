@@ -250,9 +250,9 @@ class VoiceEngine:
         elif name == "io.ring_ms":
             self.ring_ms = float(value)
         elif name == "io.input_device":
-            self.input_device = None if value is None else int(value)
+            self.input_device = None if value is None or int(value) < 0 else int(value)
         elif name == "io.output_device":
-            self.output_device = None if value is None else int(value)
+            self.output_device = None if value is None or int(value) < 0 else int(value)
         else:
             raise KeyError(f"unknown io param: {name}")
 
@@ -284,6 +284,9 @@ class VoiceEngine:
 
         self.input_device = input_device
         self.output_device = output_device
+        # A restart may follow an effect rebuild (io.sample_rate); force the
+        # first callback to re-apply intensity rather than trust the cache.
+        self._last_applied_intensity = None
 
         out_info = sd.query_devices(output_device)
         out_channels = max(1, int(out_info.get("max_output_channels", 1)))
@@ -399,6 +402,11 @@ class VoiceEngine:
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = bool(enabled)
+        # Both branches change the effect's intensity out-of-band (the ramp
+        # restart, or the direct set_intensity(0) below), so invalidate the
+        # callback's cache -- otherwise a re-enable with no ramp could match
+        # the stale cached value and skip re-applying, leaving the effect at 0.
+        self._last_applied_intensity = None
         if self.enabled:
             self._manual_intensity = None
             self.ramp.start()

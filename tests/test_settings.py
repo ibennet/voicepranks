@@ -90,3 +90,16 @@ def test_play_targets_playback_device(tmp_path, monkeypatch):
     engine.play("live")
     # Play must route to the listening device, not output_device.
     assert captured["device"] == 9
+
+
+def test_negative_device_index_means_default_none():
+    # The UI/API send -1 for "(default)"; set_param must resolve that to None
+    # (not a literal device index -1) for input and output devices.
+    engine = VoiceEngine()
+    engine.set_param("io.input_device", 3)
+    engine.set_param("io.output_device", 5)
+    assert engine.input_device == 3 and engine.output_device == 5
+    engine.set_param("io.input_device", -1)
+    engine.set_param("io.output_device", -1)
+    assert engine.input_device is None
+    assert engine.output_device is None
