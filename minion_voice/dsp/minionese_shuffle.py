@@ -225,6 +225,19 @@ class _ChunkShuffle:
 
         out_chunks = []
         while self._in.shape[0] >= need:
+            if self._strength < 1e-4:
+                # At ~zero strength the scramble is a no-op, but the
+                # equal-power crossfade (tuned for *uncorrelated* reordered
+                # chunks) leaves a subtle amplitude ripple on in-order audio.
+                # Emit the window verbatim instead -- transparent, and the
+                # same latency as the faded path (both wait for `need` and
+                # consume `window`), so the effect is undetectable at
+                # intensity 0.
+                out_chunks.append(self._in[:window].astype(np.float32).copy())
+                self._tail = np.zeros(self.fade, dtype=np.float64)
+                self._in = self._in[window:]
+                continue
+
             if self._rng.random() < self._strength:
                 perm = self._rng.permutation(K)
             else:
@@ -276,29 +289,36 @@ class MinioneseShuffle:
         self.fade_ms = FADE_MS
         self.reverse_prob = 0.0
         self.max_slew = MAX_SLEW
+        self.intensity = 1.0
 
         self._pitch = PitchShifter(self.sample_rate)
-        self._pitch.set_semitones(self.semitones)
         self._wobble = _PitchWobble(self.sample_rate, self.wobble_ms)
         self._scramble = _ChunkShuffle(
             self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms,
             reverse_prob=self.reverse_prob, seed=seed,
         )
+        self._apply_pitch()
 
-        self.intensity = 1.0
         self._slew_prev = 0.0
 
     # -- configuration -----------------------------------------------
 
+    def _apply_pitch(self) -> None:
+        # Pitch is scaled by intensity so the effect fades all the way to
+        # *nothing* -- at intensity 0 the pitch shift is 0 semitones (voice
+        # unchanged), so a long ramp-in is undetectable at the start.
+        self._pitch.set_semitones(self.semitones * self.intensity)
+
     def set_intensity(self, t: float) -> None:
         self.intensity = min(max(float(t), 0.0), 1.0)
+        self._apply_pitch()
         self._wobble.set_depth_scale(self.intensity)
         self._scramble.set_strength(self.intensity)
 
     def set_semitones(self, semitones: float) -> None:
         """Live-adjustable pitch-up amount; no rebuild needed."""
         self.semitones = float(semitones)
-        self._pitch.set_semitones(self.semitones)
+        self._apply_pitch()
 
     def set_wobble_ms(self, wobble_ms: float) -> None:
         """Pitch-wobble excursion (ms). Rebuilds the wobble delay line

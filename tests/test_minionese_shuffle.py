@@ -54,6 +54,46 @@ def test_shuffle_process_is_finite_and_nonempty():
     assert out.shape[0] > 0
 
 
+def _dominant_freq(signal: np.ndarray, sample_rate: int = SAMPLE_RATE) -> float:
+    windowed = signal.astype(np.float64) * np.hanning(len(signal))
+    spectrum = np.fft.rfft(windowed)
+    freqs = np.fft.rfftfreq(len(signal), d=1.0 / sample_rate)
+    return float(freqs[int(np.argmax(np.abs(spectrum)))])
+
+
+def _dominant_at_intensity(t: float) -> float:
+    m = MinioneseShuffle(SAMPLE_RATE, seed=0)
+    m.set_intensity(t)
+    out = _process_in_blocks(m, _gen_sawtooth(150.0, 2.0))
+    _assert_finite(out)
+    n = out.shape[0]
+    return _dominant_freq(out[n // 4 : 3 * n // 4])
+
+
+def test_intensity_scales_pitch_to_transparent_at_zero():
+    lo = _dominant_at_intensity(0.0)
+    hi = _dominant_at_intensity(1.0)
+    # At intensity 0 the pitch shift is 0 semitones -> fundamental unchanged
+    # (~150 Hz); at full intensity it's clearly pitched up.
+    assert abs(lo - 150.0) < 20.0, f"intensity 0 should preserve pitch, got {lo}"
+    assert hi > lo * 1.2, f"full intensity should pitch up, got {hi} vs {lo}"
+
+
+def test_intensity_zero_output_is_low_artifact_passthrough():
+    m = MinioneseShuffle(SAMPLE_RATE, seed=0)
+    m.set_intensity(0.0)
+    sig = _gen_sawtooth(150.0, 2.0)
+    out = _process_in_blocks(m, sig)
+    _assert_finite(out)
+    # Transparent passthrough (no crossfade ripple): the output level tracks
+    # the input level closely rather than being amplitude-modulated.
+    n = min(out.shape[0], sig.shape[0])
+    assert n > 0
+    in_rms = float(np.sqrt(np.mean(sig[:n].astype(np.float64) ** 2)))
+    out_rms = float(np.sqrt(np.mean(out[:n].astype(np.float64) ** 2)))
+    assert abs(out_rms - in_rms) / in_rms < 0.1
+
+
 def test_shuffle_set_semitones_changes_output():
     _assert_differs(_shuffle_out(), _shuffle_out(configure=lambda m: m.set_semitones(0.0)))
 
