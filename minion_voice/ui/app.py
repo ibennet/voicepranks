@@ -41,6 +41,7 @@ GROUP_ORDER = ["global", "effect", "minionese", "shuffle", "pitch", "io"]
 _SKIP_PARAM_NAMES = {
     "enabled",
     "monitor",
+    "ramp.duration_s",  # dedicated H/M/S row instead of a slider
     "io.input_device",
     "io.output_device",
     "io.playback_device",
@@ -87,7 +88,7 @@ class MinionVoiceApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(3, weight=1)
+        frame.rowconfigure(4, weight=1)
         frame.columnconfigure(0, weight=1)
 
         # -- top bar: Turn On | Settings… | Preset dropdown ------------------
@@ -106,14 +107,15 @@ class MinionVoiceApp:
         self.preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
         self._build_recorder_row(frame, row=1)
+        self._build_ramp_row(frame, row=2)
 
         ttk.Label(frame, text="Parameters (click a section to expand)").grid(
-            row=2, column=0, sticky="w", pady=(6, 0)
+            row=3, column=0, sticky="w", pady=(6, 0)
         )
 
         # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=3, column=0, sticky="nsew", pady=(2, 8))
+        scroll_container.grid(row=4, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -133,7 +135,7 @@ class MinionVoiceApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=4, column=0, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -157,6 +159,69 @@ class MinionVoiceApp:
             variable=self.monitor_var,
             command=self._on_monitor_toggle,
         ).pack(side="left", padx=(12, 0))
+
+    def _build_ramp_row(self, frame: ttk.Frame, row: int) -> None:
+        # Intensity ramp-in duration as hours/minutes/seconds text boxes,
+        # plus a Clear button for no ramp (effect at full immediately).
+        rframe = ttk.Frame(frame)
+        rframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Label(rframe, text="Ramp-in:").pack(side="left", padx=(0, 6))
+        self.ramp_h = tk.StringVar()
+        self.ramp_m = tk.StringVar()
+        self.ramp_s = tk.StringVar()
+        for var, unit in ((self.ramp_h, "h"), (self.ramp_m, "m"), (self.ramp_s, "s")):
+            entry = ttk.Entry(rframe, textvariable=var, width=5, justify="right")
+            entry.pack(side="left")
+            entry.bind("<Return>", lambda _e: self._on_ramp_set())
+            ttk.Label(rframe, text=unit).pack(side="left", padx=(1, 6))
+        ttk.Button(rframe, text="Set", command=self._on_ramp_set).pack(side="left", padx=(4, 0))
+        ttk.Button(rframe, text="Clear (no ramp)", command=self._on_ramp_clear).pack(side="left", padx=4)
+        self._populate_ramp_fields()
+
+    @staticmethod
+    def _split_seconds(total: float) -> Tuple[int, int, float]:
+        total = max(0.0, float(total))
+        hours = int(total // 3600)
+        minutes = int((total % 3600) // 60)
+        seconds = total - hours * 3600 - minutes * 60
+        return hours, minutes, seconds
+
+    def _populate_ramp_fields(self) -> None:
+        hours, minutes, seconds = self._split_seconds(self.engine.ramp.duration_s)
+        self.ramp_h.set(str(hours))
+        self.ramp_m.set(str(minutes))
+        self.ramp_s.set(f"{seconds:g}")
+
+    @staticmethod
+    def _parse_field(var: tk.StringVar) -> float:
+        text = (var.get() or "").strip()
+        if not text:
+            return 0.0
+        try:
+            return max(0.0, float(text))
+        except ValueError:
+            return 0.0
+
+    def _on_ramp_set(self) -> None:
+        total = (
+            self._parse_field(self.ramp_h) * 3600.0
+            + self._parse_field(self.ramp_m) * 60.0
+            + self._parse_field(self.ramp_s)
+        )
+        try:
+            self.engine.set_param("ramp.duration_s", total)
+        except Exception as exc:
+            self.error_message = f"Failed to set ramp: {exc}"
+        self._populate_ramp_fields()  # normalize the display (e.g. 90s -> 1m 30s)
+
+    def _on_ramp_clear(self) -> None:
+        try:
+            self.engine.set_param("ramp.duration_s", 0.0)
+        except Exception as exc:
+            self.error_message = f"Failed to clear ramp: {exc}"
+        self.ramp_h.set("0")
+        self.ramp_m.set("0")
+        self.ramp_s.set("0")
 
     def _build_param_controls(self, parent: ttk.Frame) -> None:
         groups: Dict[str, List[ParamSpec]] = {}

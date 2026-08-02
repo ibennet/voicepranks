@@ -45,7 +45,7 @@ PARAM_SPECS = [
     ParamSpec("gibberish", "global", "Minionese (gibberish)", "bool", 0, 1, 1, False),
     ParamSpec("intensity", "global", "Intensity (manual)", "float", 0.0, 1.0, 0.01, 1.0),
     ParamSpec("monitor", "global", "Live monitor (hear effect)", "bool", 0, 1, 1, False),
-    ParamSpec("ramp.duration_s", "global", "Ramp duration (s)", "float", 0.0, 5.0, 0.1, IntensityRamp().duration_s),
+    ParamSpec("ramp.duration_s", "global", "Ramp duration (s)", "float", 0.0, 86400.0, 1.0, IntensityRamp().duration_s),
 
     # -- plain mode (effect.py, flat pitch shift + optional EQ) ----------
     ParamSpec("effect.max_semitones", "effect", "Max semitones", "float", 0.0, 12.0, 0.1, MinionEffect.MAX_SEMITONES),
