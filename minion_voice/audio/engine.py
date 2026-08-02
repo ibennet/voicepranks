@@ -408,6 +408,16 @@ class VoiceEngine:
         """Override the auto-ramp with a fixed intensity (e.g. slider drag)."""
         self._manual_intensity = min(max(float(t), 0.0), 1.0)
 
+    def restart_ramp(self, duration_s: Optional[float] = None) -> None:
+        """Restart the intensity ramp from 0 with the current (or given)
+        duration, handing intensity control back to the ramp (clears any
+        manual override). `duration_s` is set directly so the new value takes
+        effect immediately, without waiting for the pending-param drain."""
+        if duration_s is not None:
+            self.ramp.set_duration(float(duration_s))
+        self._manual_intensity = None
+        self.ramp.start()
+
     def set_gibberish(self, b: bool) -> None:
         self.effect.set_gibberish(b)
         # Switching into a gibberish engine mid-run resets its internal

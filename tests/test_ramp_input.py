@@ -35,3 +35,21 @@ def test_engine_accepts_long_ramp_and_clear():
     assert engine.ramp.duration_s == 0.0
     engine.ramp.start()
     assert engine.ramp.current() == 1.0
+
+
+def test_restart_ramp_sets_duration_and_restarts_from_zero():
+    engine = VoiceEngine()
+    engine.set_manual_intensity(0.7)  # manual override in effect
+    engine.restart_ramp(4.0)
+    # Duration applied, manual override cleared, timer just started (~0).
+    assert engine.ramp.duration_s == 4.0
+    assert engine._manual_intensity is None
+    assert engine.ramp.current() < 0.05
+
+
+def test_restart_ramp_without_duration_keeps_current():
+    engine = VoiceEngine()
+    engine.ramp.set_duration(3.0)
+    engine.restart_ramp()
+    assert engine.ramp.duration_s == 3.0
+    assert engine.ramp.current() < 0.05

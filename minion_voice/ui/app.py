@@ -209,7 +209,9 @@ class MinionVoiceApp:
             + self._parse_field(self.ramp_s)
         )
         try:
-            self.engine.set_param("ramp.duration_s", total)
+            # Set the duration AND restart the ramp timer from 0, so the
+            # fade-in replays with the new duration.
+            self.engine.restart_ramp(total)
         except Exception as exc:
             self.error_message = f"Failed to set ramp: {exc}"
         self._populate_ramp_fields()  # normalize the display (e.g. 90s -> 1m 30s)
