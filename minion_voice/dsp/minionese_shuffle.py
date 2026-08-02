@@ -173,12 +173,14 @@ class _ChunkShuffle:
         chunk_ms: float = CHUNK_MS,
         shuffle_k: int = SHUFFLE_K,
         fade_ms: float = FADE_MS,
+        reverse_prob: float = 0.0,
         seed: int = 0,
     ) -> None:
         self.sr = int(sample_rate)
         self.C = max(2, int(float(chunk_ms) / 1000.0 * self.sr))
         self.K = max(1, int(shuffle_k))
         self.fade = max(0, int(float(fade_ms) / 1000.0 * self.sr))
+        self.reverse_prob = min(max(float(reverse_prob), 0.0), 1.0)
         # Equal-power crossfade ramp, 0 -> 1 over `fade` samples. Uses
         # sin (NOT sin^2) so the fade-in and its reverse (a cos) satisfy
         # sin^2 + cos^2 = 1 -> constant *power*. Reordered chunks are
@@ -193,6 +195,9 @@ class _ChunkShuffle:
 
     def set_strength(self, s: float) -> None:
         self._strength = min(max(float(s), 0.0), 1.0)
+
+    def set_reverse_prob(self, p: float) -> None:
+        self.reverse_prob = min(max(float(p), 0.0), 1.0)
 
     def reset(self) -> None:
         self._rng = np.random.default_rng(self._seed)
@@ -226,7 +231,15 @@ class _ChunkShuffle:
                 perm = np.arange(K)
 
             for p in perm:
-                g = self._faded(self._in[p * C: p * C + C + f])
+                seg = self._in[p * C: p * C + C + f]
+                # Optionally time-reverse the whole grabbed segment. Reversal
+                # turns a chunk into a phonetic non-word (so the output stops
+                # sounding like reordered real words) while keeping the local
+                # timbre. The equal-power crossfade at every chunk boundary is
+                # applied after, so reversed chunks still stitch click-free.
+                if self.reverse_prob > 0.0 and self._rng.random() < self.reverse_prob:
+                    seg = seg[::-1]
+                g = self._faded(seg)
                 if f > 0:
                     g[:f] += self._tail            # crossfade with prior tail
                     out_chunks.append(g[:C].astype(np.float32))
@@ -261,13 +274,15 @@ class MinioneseShuffle:
         self.chunk_ms = CHUNK_MS
         self.shuffle_k = SHUFFLE_K
         self.fade_ms = FADE_MS
+        self.reverse_prob = 0.0
         self.max_slew = MAX_SLEW
 
         self._pitch = PitchShifter(self.sample_rate)
         self._pitch.set_semitones(self.semitones)
         self._wobble = _PitchWobble(self.sample_rate, self.wobble_ms)
         self._scramble = _ChunkShuffle(
-            self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms, seed=seed
+            self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms,
+            reverse_prob=self.reverse_prob, seed=seed,
         )
 
         self.intensity = 1.0
@@ -294,9 +309,17 @@ class MinioneseShuffle:
 
     def _rebuild_scramble(self) -> None:
         self._scramble = _ChunkShuffle(
-            self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms, seed=self._seed
+            self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms,
+            reverse_prob=self.reverse_prob, seed=self._seed,
         )
         self._scramble.set_strength(self.intensity)
+
+    def set_reverse_prob(self, p: float) -> None:
+        """Probability each emitted chunk is time-reversed (0..1). The main
+        lever against 'sounds like reordered real words' -- reversed chunks
+        are phonetic non-words. No rebuild needed."""
+        self.reverse_prob = min(max(float(p), 0.0), 1.0)
+        self._scramble.set_reverse_prob(self.reverse_prob)
 
     def set_chunk_ms(self, chunk_ms: float) -> None:
         """Syllable-chunk length (ms). Rebuilds the scrambler (reset)."""

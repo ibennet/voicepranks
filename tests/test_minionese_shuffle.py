@@ -74,6 +74,20 @@ def test_shuffle_set_fade_ms_changes_output():
     _assert_differs(_shuffle_out(), _shuffle_out(configure=lambda m: m.set_fade_ms(5.0)))
 
 
+def test_shuffle_set_reverse_prob_changes_output_and_stays_finite():
+    # Full reversal probability must change the output vs. no reversal, and
+    # stay click-free/finite (crossfades still stitch reversed chunks).
+    _assert_differs(_shuffle_out(), _shuffle_out(configure=lambda m: m.set_reverse_prob(1.0)))
+
+
+def test_shuffle_reverse_prob_zero_is_noop():
+    # reverse_prob=0 must be identical to the default (no reversal path taken).
+    a = _shuffle_out()
+    b = _shuffle_out(configure=lambda m: m.set_reverse_prob(0.0))
+    n = min(a.shape[0], b.shape[0])
+    assert np.allclose(a[:n], b[:n])
+
+
 def test_shuffle_set_max_slew_bounds_sample_to_sample_delta():
     m = MinioneseShuffle(SAMPLE_RATE, seed=0)
     m.set_max_slew(0.01)
