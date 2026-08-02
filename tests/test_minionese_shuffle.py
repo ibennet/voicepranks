@@ -120,6 +120,19 @@ def test_shuffle_set_reverse_prob_changes_output_and_stays_finite():
     _assert_differs(_shuffle_out(), _shuffle_out(configure=lambda m: m.set_reverse_prob(1.0)))
 
 
+def test_reverse_prob_scales_with_intensity():
+    # The gibberish character (incl. chunk reversal) is governed by intensity:
+    # effective reversal probability = base * intensity.
+    m = MinioneseShuffle(SAMPLE_RATE, seed=0)
+    m.set_reverse_prob(1.0)
+    m.set_intensity(0.5)
+    assert abs(m._scramble.reverse_prob - 0.5) < 1e-9
+    m.set_intensity(0.0)
+    assert m._scramble.reverse_prob == 0.0
+    m.set_intensity(1.0)
+    assert abs(m._scramble.reverse_prob - 1.0) < 1e-9
+
+
 def test_shuffle_reverse_prob_zero_is_noop():
     # reverse_prob=0 must be identical to the default (no reversal path taken).
     a = _shuffle_out()

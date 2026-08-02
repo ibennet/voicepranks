@@ -309,11 +309,19 @@ class MinioneseShuffle:
         # unchanged), so a long ramp-in is undetectable at the start.
         self._pitch.set_semitones(self.semitones * self.intensity)
 
+    def _apply_scramble(self) -> None:
+        # The whole gibberish character is governed by intensity: both the
+        # shuffle probability AND the chunk-reversal probability scale with
+        # it, so at intensity 0 there is no scrambling or reversal (the toggle
+        # is effectively off) and it ramps in smoothly.
+        self._scramble.set_strength(self.intensity)
+        self._scramble.set_reverse_prob(self.reverse_prob * self.intensity)
+
     def set_intensity(self, t: float) -> None:
         self.intensity = min(max(float(t), 0.0), 1.0)
         self._apply_pitch()
         self._wobble.set_depth_scale(self.intensity)
-        self._scramble.set_strength(self.intensity)
+        self._apply_scramble()
 
     def set_semitones(self, semitones: float) -> None:
         """Live-adjustable pitch-up amount; no rebuild needed."""
@@ -332,14 +340,14 @@ class MinioneseShuffle:
             self.sample_rate, self.chunk_ms, self.shuffle_k, self.fade_ms,
             reverse_prob=self.reverse_prob, seed=self._seed,
         )
-        self._scramble.set_strength(self.intensity)
+        self._apply_scramble()
 
     def set_reverse_prob(self, p: float) -> None:
-        """Probability each emitted chunk is time-reversed (0..1). The main
-        lever against 'sounds like reordered real words' -- reversed chunks
-        are phonetic non-words. No rebuild needed."""
+        """Probability each emitted chunk is time-reversed (0..1), scaled by
+        intensity. The main lever against 'sounds like reordered real words'
+        -- reversed chunks are phonetic non-words. No rebuild needed."""
         self.reverse_prob = min(max(float(p), 0.0), 1.0)
-        self._scramble.set_reverse_prob(self.reverse_prob)
+        self._apply_scramble()
 
     def set_chunk_ms(self, chunk_ms: float) -> None:
         """Syllable-chunk length (ms). Rebuilds the scrambler (reset)."""
