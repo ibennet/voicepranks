@@ -146,7 +146,12 @@ class _PitchWobble:
         frac = (rel - i0).astype(np.float32)
         out = self._buf[i0] * (1.0 - frac) + self._buf[i0 + 1] * frac
 
-        keep_margin = self.delay + 8
+        # Keep enough history to cover the *full* negative LFO excursion: the
+        # read swings back as far as `delay + depth`. Trimming to only
+        # `delay + 8` (ignoring the modulation depth) starved the buffer, so
+        # the negative swing clamped onto stale samples -> periodic distortion
+        # heard as broadband static. Retain delay + depth + a small margin.
+        keep_margin = self.delay + int(np.ceil(self.depth)) + 8
         newest_rel = (self._n - 1) - self._origin
         trim = newest_rel - keep_margin
         if trim > 0:

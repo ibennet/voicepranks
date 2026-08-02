@@ -70,6 +70,35 @@ def _dominant_at_intensity(t: float) -> float:
     return _dominant_freq(out[n // 4 : 3 * n // 4])
 
 
+def _hf_energy_db(out: np.ndarray, cutoff_hz: float, sample_rate: int = SAMPLE_RATE) -> float:
+    n = len(out)
+    w = out.astype(np.float64) * np.hanning(n)
+    power = np.abs(np.fft.rfft(w)) ** 2
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+    return 10.0 * np.log10(power[freqs > cutoff_hz].sum() / (power.sum() + 1e-12) + 1e-12)
+
+
+def test_wobble_does_not_add_broadband_static():
+    # A pure low tone has no content above 2 kHz, so significant HF energy in
+    # the wobbled output is distortion (the delay-buffer starvation bug that
+    # sounded like static). It must stay well below the signal.
+    from minion_voice.dsp.minionese_shuffle import _PitchWobble
+    from minion_voice.dsp.pitch import PitchShifter
+
+    t = np.arange(int(SAMPLE_RATE * 2.0)) / SAMPLE_RATE
+    tone = (0.5 * np.sin(2.0 * np.pi * 200.0 * t)).astype(np.float32)
+    pitch = PitchShifter(SAMPLE_RATE)
+    pitch.set_semitones(6.0)
+    pitched = _process_in_blocks(pitch, tone)
+
+    wob = _PitchWobble(SAMPLE_RATE, 4.0)  # a deep wobble -- worst case
+    wob.set_depth_scale(1.0)
+    out = _process_in_blocks(wob, pitched)
+    _assert_finite(out)
+    hf = _hf_energy_db(out, 2000.0)
+    assert hf < -60.0, f"wobble added broadband HF static ({hf:.1f} dB above 2 kHz)"
+
+
 def test_intensity_scales_pitch_to_transparent_at_zero():
     lo = _dominant_at_intensity(0.0)
     hi = _dominant_at_intensity(1.0)
