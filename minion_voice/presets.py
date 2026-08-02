@@ -48,7 +48,7 @@ PRESETS: Dict[str, Dict] = {
     "minion": {
         "gibberish": True,
         "minionese.use_shuffle": True,
-        "shuffle.semitones": 6.0,
+        "shuffle.semitones": 10.0,
         "shuffle.wobble_ms": 4.0,
         "shuffle.chunk_ms": 150.0,
         "shuffle.shuffle_k": 1,
