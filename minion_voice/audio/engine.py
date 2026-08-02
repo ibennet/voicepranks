@@ -8,6 +8,7 @@ import numpy as np
 import sounddevice as sd
 
 from .. import params
+from .. import presets as presets_mod
 from ..dsp.effect import MinionEffect
 from ..dsp.ramp import IntensityRamp
 from . import wavio
@@ -182,6 +183,16 @@ class VoiceEngine:
     def snapshot(self) -> dict:
         """Return the current value of every registered param."""
         return {name: handlers.get() for name, handlers in self._registry.items()}
+
+    def apply_preset(self, name: str) -> dict:
+        """Apply a built-in preset (see `presets.PRESETS`): feed each of its
+        sound-character params through `set_param`. Works whether the engine
+        is running or stopped. Returns the resulting full snapshot. Raises
+        KeyError for an unknown preset name."""
+        preset = presets_mod.get_preset(name)
+        for pname, value in preset.items():
+            self.set_param(pname, value)
+        return self.snapshot()
 
     def _drain_pending(self) -> None:
         """Apply any params queued by `set_param` since the last block.

@@ -21,6 +21,8 @@ Endpoints (all JSON in/out unless noted):
     POST /api/devices               {input_device?, output_device?}
     POST /api/record/start
     POST /api/record/stop           -> {ok, take_seconds}
+    GET  /api/presets               -> {names, presets}
+    POST /api/presets/apply         {"name": "minion"} -> {ok, values}
     POST /api/render                -> {ok, take_seconds}
     POST /api/play                  {"which": "live"|"raw"|"rendered"}
     POST /api/save                  {"path": ..., "which": "live"|"raw"|"rendered"}
@@ -39,6 +41,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlsplit
 
 from . import params as params_mod
+from . import presets as presets_mod
 from .audio.devices import list_input_devices, list_output_devices
 
 _WEBUI_INDEX = Path(__file__).parent / "webui" / "index.html"
@@ -101,6 +104,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._handle_state()
             elif path == "/api/devices":
                 self._handle_devices_get()
+            elif path == "/api/presets":
+                self._send_json({"names": presets_mod.preset_names(), "presets": presets_mod.PRESETS})
             elif path == "/api/recording.wav":
                 which = (query.get("which") or ["live"])[0]
                 self._handle_recording_wav(which)
@@ -122,6 +127,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._handle_engine_toggle()
             elif path == "/api/devices":
                 self._handle_devices_post()
+            elif path == "/api/presets/apply":
+                body = self._read_json_body()
+                name = body.get("name")
+                if not name:
+                    self._send_error_json(HTTPStatus.BAD_REQUEST, "missing 'name'")
+                    return
+                try:
+                    values = self.engine.apply_preset(name)
+                except KeyError as exc:
+                    self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self._send_json({"ok": True, "values": values})
             elif path == "/api/record/start":
                 self.engine.record_start()
                 self._send_json({"ok": True, "status": self.engine.get_status()})

@@ -120,6 +120,19 @@ output device; `save()`/`GET /api/recording.wav` write it out as a 16-bit PCM
 WAV. Tick **Live monitor** (or `POST /api/params {"monitor": true}`) to also
 hear the processed audio on your speakers while recording.
 
+## Presets
+
+Two built-in voice presets ship in `presets.py`:
+
+- **minion** — connected, pitched-up, sing-song (no scramble).
+- **animalese** — chopped/scrambled staccato blips.
+
+Click the **Minion** / **Animalese** buttons in the GUI (or `POST
+/api/presets/apply {"name": "minion"}`; list them with `GET /api/presets`) to
+apply one instantly. Presets set the **voice character only** — they don't
+touch your input/output devices, on/off state, or the live monitor. Edit
+`PRESETS` in `presets.py` to change them or add your own.
+
 ## Audition the effect with no audio hardware
 
 `selftest.py` reads/writes WAV files directly, so you can hear the effect

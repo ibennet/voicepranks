@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Dict, List, Optional, Tuple
 
+from .. import presets as presets_mod
 from ..audio.devices import default_input_device, list_input_devices, list_output_devices
 from ..audio.engine import VoiceEngine
 from ..control_server import ControlServer
@@ -69,7 +70,7 @@ class MinionVoiceApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(1, weight=1)
 
         self.toggle_button = ttk.Button(frame, text="Turn On", command=self._on_toggle)
@@ -87,12 +88,13 @@ class MinionVoiceApp:
         self.output_combo.grid(row=2, column=1, sticky="ew", pady=4)
         self.output_combo.bind("<<ComboboxSelected>>", self._on_output_device_change)
 
-        self._build_recorder_row(frame, row=3)
+        self._build_preset_row(frame, row=3)
+        self._build_recorder_row(frame, row=4)
 
         # Scrollable area holding one generated control per PARAM_SPECS
         # entry, grouped by `spec.group`.
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(4, 8))
+        scroll_container.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(4, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -112,7 +114,18 @@ class MinionVoiceApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+    def _build_preset_row(self, frame: ttk.Frame, row: int) -> None:
+        preset_frame = ttk.Frame(frame)
+        preset_frame.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Label(preset_frame, text="Preset:").pack(side="left", padx=(0, 6))
+        for name in presets_mod.preset_names():
+            ttk.Button(
+                preset_frame,
+                text=name.title(),
+                command=lambda n=name: self._on_apply_preset(n),
+            ).pack(side="left", padx=4)
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -331,6 +344,14 @@ class MinionVoiceApp:
 
     def _on_monitor_toggle(self) -> None:
         self.engine.set_param("monitor", self.monitor_var.get())
+
+    def _on_apply_preset(self, name: str) -> None:
+        # Applies the preset's sound-character params; the status poll then
+        # re-syncs every affected slider to the new values.
+        try:
+            self.engine.apply_preset(name)
+        except Exception as exc:
+            self.error_message = f"Apply preset '{name}' failed: {exc}"
 
     def _on_play(self) -> None:
         # Replay the live processed take exactly as it was captured -- no
