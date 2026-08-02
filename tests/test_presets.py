@@ -51,9 +51,19 @@ def test_presets_only_reference_valid_nonsession_params():
     for name, values in presets.PRESETS.items():
         for key in values:
             assert key in PARAM_SPECS_BY_NAME, f"{name} sets unknown param {key}"
-            # Presets are voice character only -- never device/session state.
+            # Presets are voice character only -- never device/session state,
+            # and never `intensity` (a live master control the user owns).
             assert not key.startswith("io."), f"{name} must not set {key}"
-            assert key not in ("enabled", "monitor"), f"{name} must not set {key}"
+            assert key not in ("enabled", "monitor", "intensity"), f"{name} must not set {key}"
+
+
+def test_applying_a_preset_preserves_the_user_intensity():
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.set_param("intensity", 0.4)
+    engine.apply_preset("animalese")
+    # Preset changes character but leaves the master intensity where the user
+    # put it -- the intensity control scales the applied preset.
+    assert engine.snapshot()["intensity"] == 0.4
 
 
 def test_apply_preset_does_not_change_enabled_or_devices():

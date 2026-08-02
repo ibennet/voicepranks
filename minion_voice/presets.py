@@ -2,9 +2,13 @@
 
 A preset is a curated `{param_name: value}` dict drawn from
 `params.PARAM_SPECS`. It intentionally covers only *sound-character* params
-(the gibberish/shuffle knobs) and leaves out `io.*`, `enabled`, and
-`monitor` -- so applying a preset changes the voice without disturbing your
-devices, on/off state, or the live monitor.
+(the gibberish/shuffle knobs) and leaves out `io.*`, `enabled`, `monitor`,
+and `intensity` -- so applying a preset changes the voice without disturbing
+your devices, on/off state, live monitor, or your intensity setting.
+
+`intensity` is deliberately excluded so it stays a live master control: it
+scales the applied preset's character (wobble depth + scramble strength), and
+applying a preset never resets it.
 
 Applying is done by `VoiceEngine.apply_preset`, which just feeds each entry
 through `set_param`. The two presets below were dialed in by ear during live
@@ -19,7 +23,9 @@ from .params import PARAM_SPECS_BY_NAME
 # Params a preset is never allowed to set: environment/session state, not
 # voice character.
 _EXCLUDED_PREFIXES = ("io.",)
-_EXCLUDED_NAMES = {"enabled", "monitor"}
+# `intensity` is a live master control the user owns -- presets must not
+# reset it (they scale under it instead).
+_EXCLUDED_NAMES = {"enabled", "monitor", "intensity"}
 
 
 PRESETS: Dict[str, Dict] = {
@@ -28,7 +34,6 @@ PRESETS: Dict[str, Dict] = {
     "animalese": {
         "gibberish": True,
         "minionese.use_shuffle": True,
-        "intensity": 1.0,
         "shuffle.semitones": 5.5,
         "shuffle.wobble_ms": 1.0,
         "shuffle.chunk_ms": 80.0,
@@ -42,7 +47,6 @@ PRESETS: Dict[str, Dict] = {
     "minion": {
         "gibberish": True,
         "minionese.use_shuffle": True,
-        "intensity": 1.0,
         "shuffle.semitones": 6.0,
         "shuffle.wobble_ms": 4.0,
         "shuffle.chunk_ms": 150.0,
