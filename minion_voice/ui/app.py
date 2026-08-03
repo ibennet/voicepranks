@@ -28,12 +28,19 @@ STATUS_REFRESH_MS = 250
 GROUP_LABELS = {
     "global": "Global",
     "effect": "Plain mode (pitch + EQ)",
+    "growl": "Growl (ring mod)",
+    "distortion": "Distortion (gravel)",
+    "reverb": "Reverb",
+    "laugh": "Random laugh",
     "minionese": "Minionese — formant engine",
     "shuffle": "Minionese — shuffle engine",
     "pitch": "Pitch engine (advanced)",
     "io": "I/O (restarts audio)",
 }
-GROUP_ORDER = ["global", "effect", "minionese", "shuffle", "pitch", "io"]
+GROUP_ORDER = [
+    "global", "effect", "growl", "distortion", "reverb", "laugh",
+    "minionese", "shuffle", "pitch", "io",
+]
 
 # Params handled by dedicated controls (the Settings dialog device pickers,
 # the Turn On button, the Live monitor checkbox), so they are left out of the

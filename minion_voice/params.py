@@ -48,11 +48,36 @@ PARAM_SPECS = [
     ParamSpec("ramp.duration_s", "global", "Ramp duration (s)", "float", 0.0, 86400.0, 1.0, IntensityRamp().duration_s),
 
     # -- plain mode (effect.py, flat pitch shift + optional EQ) ----------
-    ParamSpec("effect.max_semitones", "effect", "Max semitones", "float", 0.0, 12.0, 0.1, MinionEffect.MAX_SEMITONES),
+    # Range spans negatives so the plain path can pitch *down* (deeper voice,
+    # e.g. the "scary" preset) as well as up (chipmunk). Default stays positive.
+    ParamSpec("effect.max_semitones", "effect", "Max semitones", "float", -12.0, 12.0, 0.1, MinionEffect.MAX_SEMITONES),
     ParamSpec("effect.eq_enabled", "effect", "EQ enabled", "bool", 0, 1, 1, False),
     ParamSpec("effect.eq_gain_db", "effect", "EQ gain (dB)", "float", -12.0, 12.0, 0.5, MinionEffect.MAX_EQ_GAIN_DB),
     ParamSpec("effect.eq_center_hz", "effect", "EQ center (Hz)", "float", 200.0, 6000.0, 50.0, MinionEffect.EQ_CENTER_HZ),
     ParamSpec("effect.eq_q", "effect", "EQ Q", "float", 0.3, 4.0, 0.1, MinionEffect.EQ_Q),
+    ParamSpec("effect.nasality", "effect", "Nasality", "float", 0.0, 1.0, 0.05, 0.0),
+
+    # -- growl (ring/AM modulation, plain-path post-effect, off by default) -
+    # Rate spans from slow tremolo/warble (a few Hz, e.g. the "goofy" wobble)
+    # up to fast ring-mod roughness (the "scary" growl).
+    ParamSpec("growl.enabled", "growl", "Growl enabled", "bool", 0, 1, 1, False),
+    ParamSpec("growl.rate_hz", "growl", "Growl rate (Hz)", "float", 3.0, 200.0, 1.0, 70.0),
+    ParamSpec("growl.depth", "growl", "Growl depth", "float", 0.0, 1.0, 0.05, 0.0),
+
+    # -- distortion (plain-path post-effect, off by default) --------------
+    ParamSpec("distortion.enabled", "distortion", "Distortion enabled", "bool", 0, 1, 1, False),
+    ParamSpec("distortion.drive", "distortion", "Drive (grit)", "float", 1.0, 25.0, 0.5, 1.0),
+
+    # -- reverb (plain-path post-effect, off by default) ------------------
+    ParamSpec("reverb.enabled", "reverb", "Reverb enabled", "bool", 0, 1, 1, False),
+    ParamSpec("reverb.mix", "reverb", "Wet/dry mix", "float", 0.0, 1.0, 0.05, 0.0),
+    ParamSpec("reverb.room_size", "reverb", "Room size", "float", 0.0, 1.0, 0.05, 0.5),
+    ParamSpec("reverb.damp", "reverb", "Damping", "float", 0.0, 1.0, 0.05, 0.5),
+
+    # -- laugh (random procedural giggle generator, off by default) -------
+    ParamSpec("laugh.enabled", "laugh", "Random laugh enabled", "bool", 0, 1, 1, False),
+    ParamSpec("laugh.interval_s", "laugh", "Laugh every N seconds", "float", 1.0, 120.0, 1.0, 15.0),
+    ParamSpec("laugh.gain", "laugh", "Laugh volume", "float", 0.0, 2.0, 0.05, 1.0),
 
     # -- minionese (gibberish mode) ---------------------------------------
     ParamSpec("minionese.semitones", "minionese", "Semitones", "float", 0.0, 12.0, 0.1, minionese_mod.SEMITONES),
@@ -140,6 +165,58 @@ def build_effect_registry(effect: MinionEffect) -> Dict[str, ParamHandlers]:
         "effect.eq_q": ParamHandlers(
             get=lambda: effect.eq_q,
             set=lambda v: effect.set_eq_q(float(v)),
+        ),
+        "effect.nasality": ParamHandlers(
+            get=lambda: effect.nasality,
+            set=lambda v: effect.set_nasality(float(v)),
+        ),
+        "growl.enabled": ParamHandlers(
+            get=lambda: effect.growl_enabled,
+            set=lambda v: effect.set_growl_enabled(bool(v)),
+        ),
+        "growl.rate_hz": ParamHandlers(
+            get=lambda: effect.growl.rate_hz,
+            set=lambda v: effect.set_growl_rate_hz(float(v)),
+        ),
+        "growl.depth": ParamHandlers(
+            get=lambda: effect.growl_depth,
+            set=lambda v: effect.set_growl_depth(float(v)),
+        ),
+        "distortion.enabled": ParamHandlers(
+            get=lambda: effect.distortion_enabled,
+            set=lambda v: effect.set_distortion_enabled(bool(v)),
+        ),
+        "distortion.drive": ParamHandlers(
+            get=lambda: effect.distortion_drive,
+            set=lambda v: effect.set_distortion_drive(float(v)),
+        ),
+        "reverb.enabled": ParamHandlers(
+            get=lambda: effect.reverb_enabled,
+            set=lambda v: effect.set_reverb_enabled(bool(v)),
+        ),
+        "reverb.mix": ParamHandlers(
+            get=lambda: effect.reverb_mix,
+            set=lambda v: effect.set_reverb_mix(float(v)),
+        ),
+        "reverb.room_size": ParamHandlers(
+            get=lambda: effect.reverb.room_size,
+            set=lambda v: effect.set_reverb_room_size(float(v)),
+        ),
+        "reverb.damp": ParamHandlers(
+            get=lambda: effect.reverb.damp,
+            set=lambda v: effect.set_reverb_damp(float(v)),
+        ),
+        "laugh.enabled": ParamHandlers(
+            get=lambda: effect.laugh_enabled,
+            set=lambda v: effect.set_laugh_enabled(bool(v)),
+        ),
+        "laugh.interval_s": ParamHandlers(
+            get=lambda: effect.laugh.interval_s,
+            set=lambda v: effect.set_laugh_interval_s(float(v)),
+        ),
+        "laugh.gain": ParamHandlers(
+            get=lambda: effect.laugh.gain,
+            set=lambda v: effect.set_laugh_gain(float(v)),
         ),
         "minionese.semitones": ParamHandlers(
             get=lambda: m.semitones,
