@@ -26,6 +26,13 @@ from ..control_server import ControlServer
 from ..params import PARAM_SPECS, PARAM_SPECS_BY_NAME, ParamSpec
 
 STATUS_REFRESH_MS = 250
+SAVE_DEBOUNCE_MS = 400
+
+# Params NOT persisted across sessions: on/off + live monitor are session
+# state, and io.* devices are stored separately (see settings.py). Note this
+# intentionally does NOT skip `intensity` -- unlike the preset exclusions in
+# presets.py, we *do* want to remember the user's intensity setting.
+_PERSIST_SKIP_NAMES = {"enabled", "monitor"}
 
 
 def _log(message: str) -> None:
@@ -88,6 +95,7 @@ class VoicePranksApp:
         self._dragging: Dict[str, bool] = {}
         self._param_widgets: Dict[str, dict] = {}
         self._suppress_commands = False
+        self._save_after_id: Optional[str] = None
 
         self.control_server: Optional[ControlServer] = None
         # `VOICEPRANKS_NO_SERVER` is the current name; `MINION_NO_SERVER` is the
@@ -109,6 +117,7 @@ class VoicePranksApp:
         self._load_devices_and_apply_settings()
 
         self._build_widgets()
+        self._apply_saved_settings()  # restore last preset + params (#4)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._refresh_status()
 
@@ -539,12 +548,15 @@ class VoicePranksApp:
 
     def _on_preset_selected(self, _evt) -> None:
         value = self.preset_var.get()
-        if value == _PRESET_NONE:
-            return  # "None" is a neutral/custom state -- changes nothing.
         try:
-            self.engine.apply_preset(value.lower())
+            if value == _PRESET_NONE:
+                # "None" removes all effects: neutral plain voice (#2).
+                self.engine.apply_params(presets_mod.NEUTRAL)
+            else:
+                self.engine.apply_preset(value.lower())
         except Exception as exc:
             self.error_message = f"Apply preset '{value}' failed: {exc}"
+        self._save_settings()
 
     def _on_param_slider(self, spec: ParamSpec, value_str: str) -> None:
         if self._suppress_commands:
@@ -562,6 +574,7 @@ class VoicePranksApp:
             self.engine.set_param(spec.name, value)
         except Exception as exc:
             self.error_message = f"Failed to set {spec.name}: {exc}"
+        self._schedule_save()
 
     def _on_param_checkbox(self, spec: ParamSpec, var: tk.BooleanVar) -> None:
         if self._suppress_commands:
@@ -570,6 +583,57 @@ class VoicePranksApp:
             self.engine.set_param(spec.name, bool(var.get()))
         except Exception as exc:
             self.error_message = f"Failed to set {spec.name}: {exc}"
+        self._schedule_save()
+
+    # -- persistence (remember preset + params across sessions, #4) --------
+
+    @staticmethod
+    def _is_persistable(name: str) -> bool:
+        """Whether a param is remembered across sessions (not session/device)."""
+        return name not in _PERSIST_SKIP_NAMES and not name.startswith("io.")
+
+    def _persistable_params(self) -> Dict:
+        """Snapshot of the sound params to remember (skips session/device)."""
+        return {
+            name: value
+            for name, value in self.engine.snapshot().items()
+            if self._is_persistable(name)
+        }
+
+    def _save_settings(self) -> None:
+        """Persist the current preset + params into the shared settings file
+        (device entries, written elsewhere, are preserved)."""
+        self.settings["preset"] = self.preset_var.get()
+        self.settings["params"] = self._persistable_params()
+        try:
+            settings_mod.save(self.settings)
+        except OSError as exc:
+            self.error_message = f"Could not save settings: {exc}"
+
+    def _schedule_save(self) -> None:
+        """Debounced save so a slider drag doesn't hammer the disk."""
+        if self._save_after_id is not None:
+            self.root.after_cancel(self._save_after_id)
+        self._save_after_id = self.root.after(SAVE_DEBOUNCE_MS, self._save_settings)
+
+    def _apply_saved_settings(self) -> None:
+        """Restore the last-used params + preset selection on startup."""
+        params = self.settings.get("params")
+        if isinstance(params, dict):
+            self._suppress_commands = True
+            try:
+                for name, value in params.items():
+                    if not self._is_persistable(name):
+                        continue
+                    try:
+                        self.engine.set_param(name, value)  # validates the name
+                    except Exception:
+                        pass  # ignore a stale/invalid/renamed saved key
+            finally:
+                self._suppress_commands = False
+        preset = self.settings.get("preset")
+        if preset in self.preset_combo["values"]:
+            self.preset_var.set(preset)
 
     # -- recorder ----------------------------------------------------------
 
@@ -668,6 +732,10 @@ class VoicePranksApp:
 
     def _on_close(self) -> None:
         try:
+            if self._save_after_id is not None:
+                self.root.after_cancel(self._save_after_id)
+                self._save_after_id = None
+            self._save_settings()  # flush final state before exit
             if self.control_server is not None:
                 self.control_server.stop()
             if self.engine.running:

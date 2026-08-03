@@ -66,8 +66,10 @@ def test_apply_goofy_sets_laugh_and_warble_values():
     assert snap["growl.enabled"] is True       # the warble
     assert snap["distortion.enabled"] is True  # gravel/grit
     assert snap["reverb.enabled"] is False
-    # The laugh is an independent toggle now -- goofy does not force it on/off.
-    assert "laugh.enabled" not in presets.get_preset("goofy")
+    # Goofy is the one preset that turns the random laugh on (vol 1, every 15s).
+    assert snap["laugh.enabled"] is True
+    assert snap["laugh.gain"] == 1.0
+    assert snap["laugh.interval_s"] == 15.0
 
 
 def test_switching_plain_presets_does_not_leak_enable_flags():
@@ -86,14 +88,37 @@ def test_switching_plain_presets_does_not_leak_enable_flags():
     assert engine.snapshot()["reverb.enabled"] is True
 
 
-def test_laugh_toggle_is_independent_of_presets():
-    # The laugh is a top-level overlay controlled only by its own toggle, so
-    # applying presets never turns it on or off.
+def test_goofy_enables_laugh_other_presets_disable_it():
+    # Selecting goofy turns the random laugh on; any other preset turns it off.
     engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
-    engine.set_param("laugh.enabled", True)
-    for name in ("scary", "goofy", "minion", "animalese"):
+
+    engine.apply_preset("goofy")
+    assert engine.snapshot()["laugh.enabled"] is True
+
+    for name in ("scary", "minion", "animalese"):
         engine.apply_preset(name)
-        assert engine.snapshot()["laugh.enabled"] is True, f"{name} clobbered the laugh toggle"
+        assert engine.snapshot()["laugh.enabled"] is False, f"{name} should disable the laugh"
+
+    # ...and switching back to goofy re-enables it.
+    engine.apply_preset("goofy")
+    assert engine.snapshot()["laugh.enabled"] is True
+
+
+def test_none_neutral_removes_all_effects():
+    # The "None" reset (NEUTRAL) leaves a plain, unprocessed voice.
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.apply_preset("scary")  # turn a bunch of stuff on first
+    for name, value in presets.NEUTRAL.items():
+        engine.set_param(name, value)
+    snap = engine.snapshot()
+    assert snap["gibberish"] is False
+    assert snap["effect.eq_enabled"] is False
+    assert snap["effect.nasality"] == 0.0
+    assert snap["effect.max_semitones"] == 0.0
+    assert snap["growl.enabled"] is False
+    assert snap["distortion.enabled"] is False
+    assert snap["reverb.enabled"] is False
+    assert snap["laugh.enabled"] is False
 
 
 def test_gibberish_preset_clears_plain_path_effects():
@@ -108,6 +133,19 @@ def test_gibberish_preset_clears_plain_path_effects():
     assert snap["distortion.enabled"] is False
     assert snap["reverb.enabled"] is False
     assert snap["effect.nasality"] == 0.0
+
+
+def test_snapshot_reflects_pending_params_while_running():
+    # Regression: while running, set_param stashes to _pending (applied on the
+    # audio thread). snapshot() must reflect the queued value so a save / API
+    # read right after doesn't persist the stale pre-change value.
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.running = True  # simulate a running engine (no audio thread to drain)
+    try:
+        engine.set_param("distortion.drive", 7.0)  # -> stashed in _pending
+        assert engine.snapshot()["distortion.drive"] == 7.0
+    finally:
+        engine.running = False
 
 
 def test_unknown_preset_raises():

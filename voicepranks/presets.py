@@ -31,9 +31,8 @@ _EXCLUDED_NAMES = {"enabled", "monitor", "intensity"}
 # presets spread this in so they leave NO stale plain-voice effects behind:
 # without it, applying e.g. "scary" (which enables distortion/reverb) and then
 # a gibberish preset would leave those on, and toggling gibberish off would
-# surface the old scary voice instead of a clean one.
-# The laugh is intentionally NOT here: it's a top-level overlay with its own
-# toggle, independent of presets, so it persists across preset changes.
+# surface the old scary voice instead of a clean one. It also turns the random
+# laugh off, so only presets that explicitly opt in (goofy) laugh.
 _PLAIN_OFF = {
     "effect.max_semitones": 0.0,
     "effect.eq_enabled": False,
@@ -41,7 +40,11 @@ _PLAIN_OFF = {
     "growl.enabled": False,
     "distortion.enabled": False,
     "reverb.enabled": False,
+    "laugh.enabled": False,
 }
+
+# Full neutral reset (the "None" preset): every effect off and plain voice.
+NEUTRAL = {**_PLAIN_OFF, "gibberish": False}
 
 
 PRESETS: Dict[str, Dict] = {
@@ -69,10 +72,10 @@ PRESETS: Dict[str, Dict] = {
     "minion": {
         **_PLAIN_OFF,
         # Plain-path voice (gibberish off): a clean pitch-up "minion" voice.
-        "effect.max_semitones": 8.0,
+        "effect.max_semitones": 5.6,
         "gibberish": True,
         "minionese.use_shuffle": True,
-        "shuffle.semitones": 8.0,
+        "shuffle.semitones": 5.6,  # lowered 30% from 8.0
         "shuffle.wobble_ms": 4.0,
         "shuffle.chunk_ms": 150.0,
         "shuffle.shuffle_k": 1,
@@ -125,8 +128,11 @@ PRESETS: Dict[str, Dict] = {
         "growl.depth": 0.28,
         "distortion.enabled": True,     # gravelly grit
         "distortion.drive": 6.0,
-        # reverb stays off (from _PLAIN_OFF). The laugh is an independent
-        # toggle ("Random laugh"), not part of any preset.
+        # reverb stays off (from _PLAIN_OFF). Goofy is the one preset that turns
+        # the random laugh on (every other preset leaves it off via _PLAIN_OFF).
+        "laugh.enabled": True,
+        "laugh.gain": 1.0,
+        "laugh.interval_s": 15.0,
     },
 }
 
