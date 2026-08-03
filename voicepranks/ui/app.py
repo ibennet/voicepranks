@@ -223,10 +223,15 @@ class VoicePranksApp:
         vframe.columnconfigure(1, weight=1)  # let the slider stretch
         spec = PARAM_SPECS_BY_NAME["output_gain"]
         self._build_one_control(vframe, spec, row=0)
-        # Show the level as a percentage instead of the generic "%.3g".
+        # Show the level as a percentage instead of the generic "%.3g", and
+        # seed from the live engine value (not spec.default) so an out-of-band
+        # change made before this window built -- e.g. via the control API,
+        # which starts before the widgets -- shows correctly rather than 100%
+        # until the first status poll.
         widget = self._param_widgets[spec.name]
         widget["readout_fmt"] = self._format_gain
-        widget["readout"].config(text=self._format_gain(spec.default))
+        widget["var"].set(float(self.engine.output_gain))
+        widget["readout"].config(text=self._format_gain(self.engine.output_gain))
         ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).grid(
             row=0, column=3, padx=(6, 0)
         )
