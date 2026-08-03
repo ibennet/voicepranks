@@ -56,8 +56,112 @@ pip install -r requirements.txt
 python -m minion_voice
 ```
 
-Toggle the effect on/off, drag the intensity slider, and pick your input
-device and the detected virtual output device.
+Toggle the effect on/off, choose a **Preset** from the dropdown, and open
+**Settings…** to pick your three audio devices (see below). Every DSP knob
+(pitch amount, EQ, Minionese gibberish-mode params, WSOLA pitch-engine
+internals, I/O) lives in collapsible **parameter sections** (collapsed by
+default; click a section header to expand) -- one control per entry in
+`params.PARAM_SPECS`, so nothing is hidden behind a hardcoded module constant
+anymore. Hit **Record** and the effect runs in real time while it captures the
+processed output; **Play** replays that live take verbatim (no re-render).
+Tick **Live monitor** to also hear it on your speakers while recording.
+**Re-render & Play** is a secondary A/B flow: it re-runs the *dry* mic through
+a fresh effect with whatever settings are currently dialed in.
+
+### Audio devices (Settings…)
+
+Three devices, configured in the **Settings** dialog and saved to
+`~/.minion_voice/settings.json` (editable outside the app):
+
+- **Input mic** — the physical microphone to record/process from.
+- **Output mic** — the virtual cable other apps hear as a microphone
+  (VB-CABLE / BlackHole); where processed audio is routed.
+- **Output playback** — your speakers/headphones, used *only* for listening:
+  the **Play** button and the **Live monitor** route here, never the virtual
+  cable.
+
+The GUI also starts a small local HTTP control API by default (see below),
+so the same params can be tuned live from the command line or a script
+while the window is open. Set `MINION_NO_SERVER=1` to disable it.
+
+## Live tuning over HTTP (control server)
+
+Every param in the registry (`minion_voice/params.py`) is readable/writable
+over a tiny stdlib-only JSON API, so you (or Claude, or a shell script) can
+tweak the sound *while the engine is running*, without touching the UI.
+
+Run it headless (no window, no display needed):
+
+```
+python -m minion_voice.server
+```
+
+This prints the base URL (default `http://127.0.0.1:8765`) and blocks. The
+Tkinter app (`python -m minion_voice`) starts the same server in a
+background thread automatically, so `curl` and the sliders drive one shared
+engine and stay in sync -- an API-driven change shows up in the Tkinter
+sliders on their next status poll, and vice versa.
+
+Endpoints (JSON in/out unless noted):
+
+| Method | Path | Body | Description |
+| --- | --- | --- | --- |
+| GET | `/api/state` | | `{specs, values, status}` -- full param schema, current values, engine status (incl. level meter) |
+| POST | `/api/params` | `{"name": value, ...}` | Set one or many params by dotted name |
+| POST | `/api/engine/start` | `{input_device?, output_device?}` | Start the audio streams |
+| POST | `/api/engine/stop` | | Stop the audio streams |
+| POST | `/api/engine/toggle` | | Start if needed, then flip the effect on/off |
+| GET | `/api/devices` | | List input/output devices |
+| POST | `/api/devices` | `{input_device?, output_device?}` | Switch devices (restarts streams if running) |
+| POST | `/api/record/start` | | Start recording (captures the live processed output + the dry mic) |
+| POST | `/api/record/stop` | | Stop recording |
+| POST | `/api/render` | | Re-render the dry take with the *current* params (A/B flow) |
+| POST | `/api/play` | `{"which": "live"\|"raw"\|"rendered"}` | Play a take (default `live`) through the output device |
+| POST | `/api/save` | `{"path": ..., "which": "live"\|"raw"\|"rendered"}` | Save a take to a WAV file |
+| GET | `/api/recording.wav?which=live\|raw\|rendered` | | Download a take as WAV bytes |
+| GET | `/` | | Minimal read-only status/params page |
+
+Example tuning loop:
+
+```
+curl -s localhost:8765/api/state | jq .values
+curl -s -XPOST localhost:8765/api/params -d '{"minionese.semitones": 6.5}'
+curl -s -XPOST localhost:8765/api/record/start
+# ...speak...
+curl -s -XPOST localhost:8765/api/record/stop
+curl -s -XPOST localhost:8765/api/play          # plays the live processed take
+```
+
+## Record and playback
+
+Recording captures two takes at once:
+
+- **live** — the processed effect output, captured block-by-block exactly as
+  it is produced in real time. `play()` replays this verbatim; nothing is
+  re-rendered or re-applied, so it's a faithful "as it sounded live" capture.
+  This is the default take for `play`/`save`/`recording.wav`.
+- **raw** — the dry (pre-effect) mic signal, kept so the effect can be
+  **re-rendered** onto the same take with different params (`/api/render` →
+  the `rendered` take), an optional A/B tuning flow that doesn't disturb the
+  live engine's own state.
+
+`play()` plays a take (`live`, `raw`, or `rendered`) through the selected
+output device; `save()`/`GET /api/recording.wav` write it out as a 16-bit PCM
+WAV. Tick **Live monitor** (or `POST /api/params {"monitor": true}`) to also
+hear the processed audio on your speakers while recording.
+
+## Presets
+
+Two built-in voice presets ship in `presets.py`:
+
+- **minion** — connected, pitched-up, sing-song (no scramble).
+- **animalese** — chopped/scrambled staccato blips.
+
+Click the **Minion** / **Animalese** buttons in the GUI (or `POST
+/api/presets/apply {"name": "minion"}`; list them with `GET /api/presets`) to
+apply one instantly. Presets set the **voice character only** — they don't
+touch your input/output devices, on/off state, or the live monitor. Edit
+`PRESETS` in `presets.py` to change them or add your own.
 
 ## Audition the effect with no audio hardware
 
@@ -101,8 +205,15 @@ pytest -q
 
 ```
 minion_voice/
-  dsp/        pitch shifting, peaking EQ, intensity ramp, combined effect
-  audio/      device discovery + the real-time capture/output engine
-  ui/         tkinter GUI
-  selftest.py CLI WAV-file audition tool
+  dsp/             pitch shifting, peaking EQ, intensity ramp, Minionese
+                    gibberish mode, combined effect
+  audio/           device discovery, WAV read/write, the real-time
+                    capture/output engine (param registry, level meter,
+                    recorder)
+  ui/               tkinter GUI (generated param grid + record/playback)
+  webui/            minimal read-only status page served by the control API
+  params.py         PARAM_SPECS -- single source of truth for every knob
+  control_server.py stdlib HTTP JSON control API
+  server.py         headless entrypoint (`python -m minion_voice.server`)
+  selftest.py       CLI WAV-file audition tool
 ```

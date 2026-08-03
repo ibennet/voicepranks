@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>minion_voice control server</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 2rem; max-width: 720px; color: #222; }
+  h1 { font-size: 1.2rem; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
+  th { color: #666; font-weight: 600; }
+  code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
+  .group { color: #888; font-size: 0.75rem; text-transform: uppercase; }
+  #err { color: #b00020; }
+</style>
+</head>
+<body>
+<h1>minion_voice control server (read-only)</h1>
+<p>This is a status view only. Drive the engine from Tkinter or the <code>/api/*</code> JSON endpoints.</p>
+<div id="err"></div>
+<h2>Status</h2>
+<table id="status"></table>
+<h2>Params</h2>
+<table id="params">
+  <thead><tr><th>group</th><th>name</th><th>label</th><th>value</th></tr></thead>
+  <tbody id="params-body"></tbody>
+</table>
+
+<script>
+async function refresh() {
+  try {
+    const res = await fetch('/api/state');
+    const data = await res.json();
+    document.getElementById('err').textContent = '';
+
+    const statusTable = document.getElementById('status');
+    statusTable.innerHTML = '';
+    for (const [k, v] of Object.entries(data.status)) {
+      const row = document.createElement('tr');
+      const kc = document.createElement('th');
+      kc.textContent = k;
+      const vc = document.createElement('td');
+      vc.textContent = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      row.appendChild(kc);
+      row.appendChild(vc);
+      statusTable.appendChild(row);
+    }
+
+    const body = document.getElementById('params-body');
+    body.innerHTML = '';
+    for (const spec of data.specs) {
+      const row = document.createElement('tr');
+      const g = document.createElement('td');
+      g.className = 'group';
+      g.textContent = spec.group;
+      const n = document.createElement('td');
+      n.innerHTML = '<code>' + spec.name + '</code>';
+      const l = document.createElement('td');
+      l.textContent = spec.label;
+      const v = document.createElement('td');
+      v.textContent = String(data.values[spec.name]);
+      row.appendChild(g);
+      row.appendChild(n);
+      row.appendChild(l);
+      row.appendChild(v);
+      body.appendChild(row);
+    }
+  } catch (e) {
+    document.getElementById('err').textContent = 'Failed to load /api/state: ' + e;
+  }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

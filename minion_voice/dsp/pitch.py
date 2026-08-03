@@ -100,6 +100,20 @@ class PitchShifter:
     def set_semitones(self, semitones: float) -> None:
         self.set_ratio(2.0 ** (float(semitones) / 12.0))
 
+    def set_frame(self, frame: int) -> None:
+        """Change the WSOLA analysis/synthesis window length. Rebuilds
+        the Hann window and resets all WSOLA/resample state."""
+        self.L = int(frame)
+        self.Hs = self.L // 2
+        self.win = np.hanning(self.L).astype(np.float64)
+        self._init_state()
+
+    def set_tol(self, tol: int) -> None:
+        """Change the WSOLA search tolerance (samples). Resets state so
+        the search window doesn't straddle stale buffered geometry."""
+        self.tol = int(tol)
+        self._init_state()
+
     def reset(self) -> None:
         self._init_state()
 

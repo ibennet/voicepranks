@@ -14,11 +14,11 @@ pitch shift (--semitones/--eq-db are ignored in that mode).
 from __future__ import annotations
 
 import argparse
-import wave
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
+from .audio.wavio import read_wav, write_wav
 from .dsp.effect import MinionEffect
 
 DEFAULT_SAMPLE_RATE = 48000
@@ -45,37 +45,6 @@ def _synthesize_test_signal(sample_rate: int = DEFAULT_SAMPLE_RATE, duration_s: 
         signal[-fade_len:] *= fade[::-1]
 
     return signal.astype(np.float32)
-
-
-def read_wav(path: str) -> Tuple[int, np.ndarray]:
-    """Read a mono (or first-channel-of-multi) 16-bit PCM WAV as float32 [-1, 1]."""
-    with wave.open(path, "rb") as wf:
-        sample_rate = wf.getframerate()
-        n_channels = wf.getnchannels()
-        sampwidth = wf.getsampwidth()
-        n_frames = wf.getnframes()
-        raw = wf.readframes(n_frames)
-
-    if sampwidth != 2:
-        raise ValueError(f"Only 16-bit PCM WAV is supported, got sampwidth={sampwidth}")
-
-    data = np.frombuffer(raw, dtype=np.int16)
-    if n_channels > 1:
-        data = data.reshape(-1, n_channels)[:, 0]
-
-    float_data = (data.astype(np.float32)) / 32768.0
-    return sample_rate, float_data
-
-
-def write_wav(path: str, sample_rate: int, mono: np.ndarray) -> None:
-    """Write a mono float32 [-1, 1] array as a 16-bit PCM WAV file."""
-    clipped = np.clip(mono, -1.0, 1.0)
-    pcm = (clipped * 32767.0).astype(np.int16)
-    with wave.open(path, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm.tobytes())
 
 
 def _rms(signal: np.ndarray) -> float:
