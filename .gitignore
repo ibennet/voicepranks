@@ -5,7 +5,7 @@ __pycache__/
 *.wav
 # ...but keep the bundled goofy laugh clip so the "goofy" preset ships with the
 # real laugh instead of falling back to the synthesized one.
-!minion_voice/assets/goofy_laugh.wav
+!voicepranks/assets/goofy_laugh.wav
 build/
 dist/
 *.egg-info/
