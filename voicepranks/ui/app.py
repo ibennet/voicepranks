@@ -454,6 +454,12 @@ class VoicePranksApp:
             values = ["(default)"] + [f"{idx}: {name}" for idx, name in devices]
             var = tk.StringVar()
             cb = ttk.Combobox(body, textvariable=var, values=values, state="readonly", width=34)
+            # Keep a reference to the StringVar alive on the widget. Without
+            # this, `var` is a local that CPython garbage-collects the moment
+            # this function returns, which unsets the linked Tcl variable and
+            # blanks the combobox display -- so a saved device would no longer
+            # appear selected when the dialog is reopened.
+            cb._device_var = var
             sel = 0
             for i, (idx, _name) in enumerate(devices):
                 if idx == current_idx:
