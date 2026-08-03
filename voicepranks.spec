@@ -29,11 +29,16 @@ DIST_NAME = "voicepranks"  # Windows folder / exe name
 # lets sounddevice locate the lib inside the frozen bundle.
 binaries = collect_dynamic_libs("_sounddevice_data")
 
-# Ship the control-server status page. It's a non-Python data file, so
-# PyInstaller won't pick it up from the import graph; without this the frozen
-# bundle serves no "/" page (control_server locates it via __file__, which
-# resolves to this bundled copy). dest keeps the package-relative layout.
-datas = [("voicepranks/webui/index.html", "voicepranks/webui")]
+# Non-Python data files PyInstaller won't pick up from the import graph. Each
+# `dest` keeps the package-relative layout so the code can locate the file via
+# `__file__` inside the frozen bundle (same as when running from source).
+#   - webui/index.html: the control-server status page (served at "/").
+#   - assets/goofy_laugh.wav: the real Goofy laugh; without it the "goofy"
+#     preset falls back to the synthesized laugh in the bundle.
+datas = [
+    ("voicepranks/webui/index.html", "voicepranks/webui"),
+    ("voicepranks/assets/goofy_laugh.wav", "voicepranks/assets"),
+]
 
 a = Analysis(
     ["launcher.py"],
