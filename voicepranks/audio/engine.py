@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import threading
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import sounddevice as sd
@@ -613,6 +613,15 @@ class VoiceEngine:
 
     # -- stream callbacks ------------------------------------------------
 
+    @staticmethod
+    def _rms_peak(sig: np.ndarray) -> Tuple[float, float]:
+        """(rms, peak) of a block as plain floats, or (0.0, 0.0) when empty.
+        Shared by the dry-input and output-mic level meters."""
+        if sig.size:
+            s64 = sig.astype(np.float64)
+            return float(np.sqrt(np.mean(s64 ** 2))), float(np.max(np.abs(s64)))
+        return 0.0, 0.0
+
     def _input_callback(self, indata, frames, time_info, status) -> None:  # noqa: D401
         try:
             self._drain_pending()
@@ -620,13 +629,7 @@ class VoiceEngine:
             mono = indata[:, 0] if indata.ndim > 1 else indata
             mono = np.asarray(mono, dtype=np.float32)
 
-            if mono.size:
-                dry64 = mono.astype(np.float64)
-                self._dry_rms = float(np.sqrt(np.mean(dry64 ** 2)))
-                self._dry_peak = float(np.max(np.abs(dry64)))
-            else:
-                self._dry_rms = 0.0
-                self._dry_peak = 0.0
+            self._dry_rms, self._dry_peak = self._rms_peak(mono)
 
             if self.enabled:
                 t = self._manual_intensity if self._manual_intensity is not None else self.ramp.current()
@@ -662,13 +665,7 @@ class VoiceEngine:
             # Meter the output-mic signal (post-gain) so the "out" level shows
             # what other apps actually receive, revealing clipping when the
             # volume is pushed hot.
-            if out_mic.size:
-                proc64 = out_mic.astype(np.float64)
-                self._proc_rms = float(np.sqrt(np.mean(proc64 ** 2)))
-                self._proc_peak = float(np.max(np.abs(proc64)))
-            else:
-                self._proc_rms = 0.0
-                self._proc_peak = 0.0
+            self._proc_rms, self._proc_peak = self._rms_peak(out_mic)
 
             self.ring.write(out_mic)
             # Feed the live monitor the ungained processed audio (its own ring
