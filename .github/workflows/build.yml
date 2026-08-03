@@ -3,6 +3,8 @@ name: Build standalone bundles
 # Builds the double-clickable VoicePranks bundles for macOS and Windows.
 # - Push a version tag (e.g. v0.1.0) -> builds all platforms AND publishes a
 #   GitHub Release with the zips attached.
+# - Called by release-on-merge.yml with a `tag_name` -> builds all platforms
+#   AND publishes a Release at that tag (auto-versioned on merge to main).
 # - Run manually from the Actions tab (workflow_dispatch) -> builds all
 #   platforms and uploads them as downloadable workflow artifacts (no release).
 on:
@@ -10,6 +12,13 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "Tag to create + publish the release at (e.g. v0.1.4). Empty = build only, no release."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write  # needed to create the Release on tag builds
@@ -69,7 +78,10 @@ jobs:
   release:
     name: Publish release
     needs: [macos, windows]
-    if: startsWith(github.ref, 'refs/tags/')
+    # Publish on a version-tag push (github.ref = the tag) or when a caller
+    # passes a tag_name (auto-versioned merge path). Manual workflow_dispatch
+    # leaves both empty -> artifacts only, no release.
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag_name != ''
     runs-on: ubuntu-latest
     steps:
       - name: Download all build artifacts
@@ -80,6 +92,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Empty on a tag push -> the action uses github.ref's tag. Set on the
+          # merge path -> the action creates this tag at the merge commit (SHA).
+          tag_name: ${{ inputs.tag_name }}
           files: artifacts/*.zip
           fail_on_unmatched_files: true
           generate_release_notes: true
