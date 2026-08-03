@@ -107,10 +107,11 @@ class VoiceEngine:
         self.ring = _RingBuffer(ring_capacity)
 
         self.enabled = False
-        # Post-effect output level (linear multiplier on the processed signal
-        # before it hits the output ring, the live monitor, and the recorded
-        # take). Lets a too-quiet preset be boosted without re-tuning its DSP;
-        # 1.0 = unity, >1.0 boosts, 0.0 = silence.
+        # Output-mic level: a linear multiplier applied to the processed signal
+        # on its way to the output ring (the virtual cable other apps hear)
+        # ONLY -- not the live monitor or recorded takes. Lets a too-quiet
+        # preset be sent hot to other apps without re-tuning its DSP or changing
+        # what you monitor. 1.0 = unity, >1.0 boosts, 0.0 = silence.
         self.output_gain = 1.0
         self._manual_intensity: Optional[float] = None
         # Last intensity pushed to the effect from the callback, so a constant
@@ -577,10 +578,9 @@ class VoiceEngine:
         fresh.set_intensity(float(values.get("intensity", 1.0)))
 
         out = _process_in_blocks(fresh, self._raw_take, blocksize=self.blocksize)
-        # Match the live path: apply the current output level so an A/B
-        # re-render sounds as loud as what the engine is sending out.
-        if self.output_gain != 1.0 and out.size:
-            out = out * np.float32(self.output_gain)
+        # No output-volume trim here: that trims only the output mic, and the
+        # re-rendered take is played to your listening device (Play), not the
+        # virtual cable.
         self._rendered_take = out
         return out
 
@@ -637,17 +637,13 @@ class VoiceEngine:
             else:
                 processed = mono
 
-            # Apply the output level after the effect (and after dry
-            # passthrough) so the recorded take, the "out" meter, the virtual
-            # cable, and the live monitor all reflect what actually goes out.
-            if self.output_gain != 1.0 and processed.size:
-                processed = processed * np.float32(self.output_gain)
-
             # Capture both takes under one lock: the live processed output
             # (the real-time effect result, replayed verbatim by Play) and
             # the dry mic (for optional re-render). The effect emits a
             # variable number of samples per block, so the live take is the
-            # concatenation of exactly what went out.
+            # concatenation of exactly what went out. Captured pre-gain: Output
+            # volume trims only the output mic (below), and Play routes takes to
+            # your listening device, which that trim must not touch.
             if self._recording:
                 with self._record_lock:
                     if self._recording:
@@ -655,17 +651,28 @@ class VoiceEngine:
                         if processed.size:
                             self._live_chunks.append(np.asarray(processed, dtype=np.float32).copy())
 
-            if processed.size:
-                proc64 = processed.astype(np.float64)
+            # Output volume trims ONLY the output mic (the virtual cable other
+            # apps hear), leaving the live monitor and recorded takes at their
+            # natural level -- so a quiet preset can be sent hot to other apps
+            # without changing what you monitor. Applied just before the ring.
+            out_mic = processed
+            if self.output_gain != 1.0 and processed.size:
+                out_mic = processed * np.float32(self.output_gain)
+
+            # Meter the output-mic signal (post-gain) so the "out" level shows
+            # what other apps actually receive, revealing clipping when the
+            # volume is pushed hot.
+            if out_mic.size:
+                proc64 = out_mic.astype(np.float64)
                 self._proc_rms = float(np.sqrt(np.mean(proc64 ** 2)))
                 self._proc_peak = float(np.max(np.abs(proc64)))
             else:
                 self._proc_rms = 0.0
                 self._proc_peak = 0.0
 
-            self.ring.write(processed)
-            # Feed the live monitor the same processed audio (its own ring so
-            # the two output streams don't consume each other's samples).
+            self.ring.write(out_mic)
+            # Feed the live monitor the ungained processed audio (its own ring
+            # so the two output streams don't consume each other's samples).
             if self.monitor_enabled and self.monitor_stream is not None:
                 self.monitor_ring.write(processed)
         except Exception as exc:  # keep the audio thread alive
