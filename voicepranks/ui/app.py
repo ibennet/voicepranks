@@ -41,6 +41,7 @@ def _log(message: str) -> None:
     except (OSError, ValueError):
         pass
 
+
 GROUP_LABELS = {
     "global": "Global",
     "effect": "Plain mode (pitch + EQ)",
