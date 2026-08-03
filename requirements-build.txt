@@ -1,0 +1,4 @@
+# Build-only dependencies for producing standalone executables.
+# End users do NOT need these — only whoever builds the distributable bundle.
+# Install alongside the runtime deps:  pip install -r requirements.txt -r requirements-build.txt
+pyinstaller>=6.0

@@ -1,0 +1,84 @@
+name: Build standalone bundles
+
+# Builds the double-clickable Minion Voice bundles for macOS and Windows.
+# - Push a version tag (e.g. v0.1.0) -> builds all platforms AND publishes a
+#   GitHub Release with the zips attached.
+# - Run manually from the Actions tab (workflow_dispatch) -> builds all
+#   platforms and uploads them as downloadable workflow artifacts (no release).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create the Release on tag builds
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+          - runner: macos-13   # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # setup-python ships Tk 8.6+, avoids the blank-window trap
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Build bundle
+        run: bash build-macos.sh  # via `bash` so it doesn't depend on the file's exec bit
+      - name: Name the zip by arch
+        run: mv "dist/minion-voice-macos.zip" "dist/minion-voice-macos-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minion-voice-macos-${{ matrix.arch }}
+          path: dist/minion-voice-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Build bundle
+        run: .\build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minion-voice-windows-x64
+          path: dist/minion-voice-windows.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
