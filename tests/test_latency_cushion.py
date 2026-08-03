@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.audio.engine import VoiceEngine
-from minion_voice.dsp.effect import MinionEffect
+from voicepranks.audio.engine import VoiceEngine
+from voicepranks.dsp.effect import MinionEffect
 
 SAMPLE_RATE = 48000
 

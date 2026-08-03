@@ -1,9 +1,9 @@
 """Audition the Minion DSP effect on a WAV file with no audio hardware.
 
 Usage:
-    python -m minion_voice.selftest OUTPUT.wav
-    python -m minion_voice.selftest INPUT.wav OUTPUT.wav [--semitones 8] [--eq-db 8]
-    python -m minion_voice.selftest INPUT.wav OUTPUT.wav --gibberish
+    python -m voicepranks.selftest OUTPUT.wav
+    python -m voicepranks.selftest INPUT.wav OUTPUT.wav [--semitones 8] [--eq-db 8]
+    python -m voicepranks.selftest INPUT.wav OUTPUT.wav --gibberish
 
 If INPUT.wav is omitted, a 2-second synthetic test tone (200 Hz with a
 little vibrato) is generated so the tool is runnable with zero inputs.

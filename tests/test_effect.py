@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.dsp.effect import MinionEffect
+from voicepranks.dsp.effect import MinionEffect
 
 SAMPLE_RATE = 48000
 BLOCK = 256

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the macOS standalone bundle (dist/Minion Voice.app) and zip it.
+# Build the macOS standalone bundle (dist/VoicePranks.app) and zip it.
 #
 # Must run on a Mac. Use a Homebrew Python (Tk 8.6+), NOT Apple's system
 # /usr/bin/python3 (Tk 8.5), which produces a blank GUI window.
@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 
 PYTHON="${PYTHON:-python3}"
 VENV=".venv-build"
-# The .app name is owned solely by minion-voice.spec; this script discovers
+# The .app name is owned solely by voicepranks.spec; this script discovers
 # whatever bundle PyInstaller produced rather than re-hardcoding the name.
 
 # Guard against the Apple-system-Python / Tk 8.5 blank-window trap before we
@@ -37,7 +37,7 @@ pip install --quiet -r requirements.txt -r requirements-build.txt
 
 echo "==> Running PyInstaller"
 rm -rf build dist  # clean slate so the *.app glob below is unambiguous
-pyinstaller minion-voice.spec --noconfirm
+pyinstaller voicepranks.spec --noconfirm
 
 # Locate the bundle PyInstaller produced (name comes from the spec).
 shopt -s nullglob
@@ -49,7 +49,7 @@ if [ "${#apps[@]}" -ne 1 ]; then
 fi
 
 echo "==> Staging zip (app + INSTALL.txt)"
-STAGE="dist/minion-voice-macos"
+STAGE="dist/voicepranks-macos"
 mkdir -p "$STAGE"
 mv "${apps[0]}" "$STAGE/"  # move (not copy) — the zip is the deliverable
 cp INSTALL.txt "$STAGE/"

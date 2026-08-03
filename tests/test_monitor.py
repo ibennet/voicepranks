@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.audio.engine import VoiceEngine
+from voicepranks.audio.engine import VoiceEngine
 
 SAMPLE_RATE = 48000
 BLOCK = 256

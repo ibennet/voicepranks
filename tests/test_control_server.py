@@ -11,8 +11,8 @@ import json
 import numpy as np
 import pytest
 
-from minion_voice.audio.engine import VoiceEngine
-from minion_voice.control_server import ControlServer
+from voicepranks.audio.engine import VoiceEngine
+from voicepranks.control_server import ControlServer
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def test_record_render_play_flow_over_http(server, monkeypatch):
         played["buf"] = buf
         played["sample_rate"] = sample_rate
 
-    monkeypatch.setattr("minion_voice.audio.engine.sd.play", fake_play)
+    monkeypatch.setattr("voicepranks.audio.engine.sd.play", fake_play)
 
     status, _out = _post(base_url, "/api/record/start", {})
     assert status == 200

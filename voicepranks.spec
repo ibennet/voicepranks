@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Minion Voice.
+"""PyInstaller spec for VoicePranks.
 
 One committed spec drives both macOS and Windows one-folder builds.
-Build with:  pyinstaller minion-voice.spec --noconfirm
+Build with:  pyinstaller voicepranks.spec --noconfirm
 
 Notes:
 - sounddevice wraps PortAudio; its native lib must be collected explicitly.
@@ -19,8 +19,8 @@ import sys
 
 from PyInstaller.utils.hooks import collect_dynamic_libs
 
-APP_NAME = "Minion Voice"  # macOS .app display name
-DIST_NAME = "minion-voice"  # Windows folder / exe name
+APP_NAME = "VoicePranks"  # macOS .app display name
+DIST_NAME = "voicepranks"  # Windows folder / exe name
 
 # Bundle the PortAudio native lib sounddevice loads at runtime. It ships in the
 # separate `_sounddevice_data` package (NOT inside `sounddevice`, which is a
@@ -29,9 +29,16 @@ DIST_NAME = "minion-voice"  # Windows folder / exe name
 # lets sounddevice locate the lib inside the frozen bundle.
 binaries = collect_dynamic_libs("_sounddevice_data")
 
+# Ship the control-server status page. It's a non-Python data file, so
+# PyInstaller won't pick it up from the import graph; without this the frozen
+# bundle serves no "/" page (control_server locates it via __file__, which
+# resolves to this bundled copy). dest keeps the package-relative layout.
+datas = [("voicepranks/webui/index.html", "voicepranks/webui")]
+
 a = Analysis(
     ["launcher.py"],
     binaries=binaries,
+    datas=datas,
 )
 
 pyz = PYZ(a.pure, a.zipped_data)
@@ -58,10 +65,10 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name=f"{APP_NAME}.app",
-        bundle_identifier="com.voicepranks.minionvoice",
+        bundle_identifier="com.voicepranks.app",
         info_plist={
             "NSMicrophoneUsageDescription": (
-                "Minion Voice needs your microphone to apply the voice effect."
+                "VoicePranks needs your microphone to apply the voice effect."
             ),
             "NSHighResolutionCapable": True,
         },

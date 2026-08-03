@@ -10,16 +10,16 @@ import time
 import numpy as np
 import pytest
 
-from minion_voice.dsp.distortion import Distortion
-from minion_voice.dsp.effect import MinionEffect
-from minion_voice.dsp.growl import Growl
-from minion_voice.dsp.laugh import GoofyLaugh
-from minion_voice.dsp.minionese import Minionese
-from minion_voice.dsp.pitch import PitchShifter
-from minion_voice.dsp.ramp import IntensityRamp
-from minion_voice.dsp.reverb import Reverb
-from minion_voice.params import build_effect_registry
-from minion_voice.presets import get_preset
+from voicepranks.dsp.distortion import Distortion
+from voicepranks.dsp.effect import MinionEffect
+from voicepranks.dsp.growl import Growl
+from voicepranks.dsp.laugh import GoofyLaugh
+from voicepranks.dsp.minionese import Minionese
+from voicepranks.dsp.pitch import PitchShifter
+from voicepranks.dsp.ramp import IntensityRamp
+from voicepranks.dsp.reverb import Reverb
+from voicepranks.params import build_effect_registry
+from voicepranks.presets import get_preset
 
 SAMPLE_RATE = 48000
 BLOCK = 256

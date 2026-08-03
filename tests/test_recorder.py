@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from minion_voice.audio.engine import VoiceEngine
+from voicepranks.audio.engine import VoiceEngine
 
 SAMPLE_RATE = 48000
 BLOCK = 256
@@ -133,7 +133,7 @@ def test_save_and_play_use_the_requested_take(tmp_path, monkeypatch):
         played["buf"] = buf
         played["sample_rate"] = sample_rate
 
-    monkeypatch.setattr("minion_voice.audio.engine.sd.play", fake_play)
+    monkeypatch.setattr("voicepranks.audio.engine.sd.play", fake_play)
 
     # Default play() targets the live processed take.
     engine.play()

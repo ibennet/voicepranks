@@ -1,10 +1,11 @@
-"""Minimal tkinter GUI for the Minion Voice engine.
+"""Minimal tkinter GUI for the VoicePranks engine.
 
 Every tunable in `params.PARAM_SPECS` gets a generated slider/checkbox in
 a scrollable grid here, so the desktop UI never hardcodes the param list
 -- add a knob to the registry and it shows up automatically. The same
 registry backs the HTTP control API (`control_server.py`), which this app
-also starts by default (set `MINION_NO_SERVER=1` to disable), so Claude
+also starts by default (set `VOICEPRANKS_NO_SERVER=1` to disable; the legacy
+`MINION_NO_SERVER` name is still honored), so Claude
 or a `curl` can tweak params live while this window is open; sliders pick
 up out-of-band API changes on the next status poll.
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 import tkinter as tk
 from tkinter import ttk
 from typing import Dict, List, Optional, Tuple
@@ -24,6 +26,23 @@ from ..control_server import ControlServer
 from ..params import PARAM_SPECS, ParamSpec
 
 STATUS_REFRESH_MS = 250
+
+
+def _log(message: str) -> None:
+    """Write a diagnostic line to stderr, tolerating a missing stream.
+
+    In a PyInstaller windowed build on Windows there is no attached console,
+    so `sys.stderr` is None and a bare `.write()` raises AttributeError. Guard
+    it so logging is best-effort and never crashes the GUI on launch.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        stream.write(message)
+    except (OSError, ValueError):
+        pass
+
 
 GROUP_LABELS = {
     "global": "Global",
@@ -57,10 +76,10 @@ _SKIP_PARAM_NAMES = {
 _PRESET_NONE = "None"
 
 
-class MinionVoiceApp:
+class VoicePranksApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Minion Voice — voicepranks")
+        self.root.title("VoicePranks")
 
         self.engine = VoiceEngine()
         self.error_message: Optional[str] = None
@@ -70,10 +89,15 @@ class MinionVoiceApp:
         self._suppress_commands = False
 
         self.control_server: Optional[ControlServer] = None
-        if os.environ.get("MINION_NO_SERVER") != "1":
+        # `VOICEPRANKS_NO_SERVER` is the current name; `MINION_NO_SERVER` is the
+        # pre-rebrand alias, still honored so existing launch scripts keep working.
+        no_server = os.environ.get(
+            "VOICEPRANKS_NO_SERVER", os.environ.get("MINION_NO_SERVER")
+        )
+        if no_server != "1":
             self.control_server = ControlServer(self.engine)
             url = self.control_server.start()
-            sys.stderr.write(f"[minion_voice] control API listening at {url}\n")
+            _log(f"[voicepranks] control API listening at {url}\n")
 
         # Device lists + persisted device selection (see settings.py). Loaded
         # before the widgets so the Settings dialog and engine start with the
@@ -392,7 +416,7 @@ class MinionVoiceApp:
         ttk.Label(
             body,
             text="Input/Output feed recording; Playback is only for listening.\n"
-            "Saved to ~/.minion_voice/settings.json.",
+            "Saved to ~/.voicepranks/settings.json.",
             foreground="#666",
             justify="left",
         ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 4))
@@ -605,8 +629,8 @@ def _warn_if_broken_tk() -> None:
     macOS. Warn loudly with the fix instead of leaving the user staring at an
     empty window."""
     if tk.TkVersion < 8.6:
-        sys.stderr.write(
-            "\n[minion_voice] WARNING: this Python is using Tk "
+        _log(
+            "\n[voicepranks] WARNING: this Python is using Tk "
             f"{tk.TkVersion}, which renders blank windows on modern macOS.\n"
             "  Fix: install a Python with a newer Tk, e.g.\n"
             "    brew install python-tk\n"
@@ -615,8 +639,16 @@ def _warn_if_broken_tk() -> None:
         )
 
 
+def _report_callback_exception(exc, val, tb) -> None:
+    """Tk invokes this on an uncaught exception inside a callback. The stock
+    handler writes the traceback to sys.stderr, which is None in a windowed
+    build -- the exact crash `_log` guards against -- so route through it."""
+    _log("".join(traceback.format_exception(exc, val, tb)))
+
+
 def run() -> None:
     _warn_if_broken_tk()
     root = tk.Tk()
-    MinionVoiceApp(root)
+    root.report_callback_exception = _report_callback_exception
+    VoicePranksApp(root)
     root.mainloop()

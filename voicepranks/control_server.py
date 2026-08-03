@@ -3,7 +3,7 @@
 Pure stdlib (`http.server`), no new dependencies. Wraps
 `http.server.ThreadingHTTPServer` and runs it in a daemon thread so it can
 sit alongside the Tkinter UI (both drive the same engine instance) or run
-standalone (`minion_voice/server.py`).
+standalone (`voicepranks/server.py`).
 
 Both the human (Tkinter) and the API mutate the engine exclusively
 through `VoiceEngine.set_param`/`snapshot`, so a slider drag and a `curl`
@@ -172,7 +172,7 @@ class _Handler(BaseHTTPRequestHandler):
         if _WEBUI_INDEX.exists():
             self._send_bytes(_WEBUI_INDEX.read_bytes(), "text/html; charset=utf-8")
         else:
-            self._send_bytes(b"<html><body>minion_voice control server</body></html>", "text/html")
+            self._send_bytes(b"<html><body>voicepranks control server</body></html>", "text/html")
 
     def _handle_state(self) -> None:
         self._send_json(
