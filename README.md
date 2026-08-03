@@ -82,7 +82,8 @@ Three devices, configured in the **Settings** dialog and saved to
 
 The GUI also starts a small local HTTP control API by default (see below),
 so the same params can be tuned live from the command line or a script
-while the window is open. Set `MINION_NO_SERVER=1` to disable it.
+while the window is open. Set `VOICEPRANKS_NO_SERVER=1` to disable it (the
+legacy `MINION_NO_SERVER` name still works too).
 
 ## Live tuning over HTTP (control server)
 

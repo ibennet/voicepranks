@@ -4,7 +4,8 @@ Every tunable in `params.PARAM_SPECS` gets a generated slider/checkbox in
 a scrollable grid here, so the desktop UI never hardcodes the param list
 -- add a knob to the registry and it shows up automatically. The same
 registry backs the HTTP control API (`control_server.py`), which this app
-also starts by default (set `MINION_NO_SERVER=1` to disable), so Claude
+also starts by default (set `VOICEPRANKS_NO_SERVER=1` to disable; the legacy
+`MINION_NO_SERVER` name is still honored), so Claude
 or a `curl` can tweak params live while this window is open; sliders pick
 up out-of-band API changes on the next status poll.
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 import tkinter as tk
 from tkinter import ttk
 from typing import Dict, List, Optional, Tuple
@@ -87,7 +89,12 @@ class VoicePranksApp:
         self._suppress_commands = False
 
         self.control_server: Optional[ControlServer] = None
-        if os.environ.get("MINION_NO_SERVER") != "1":
+        # `VOICEPRANKS_NO_SERVER` is the current name; `MINION_NO_SERVER` is the
+        # pre-rebrand alias, still honored so existing launch scripts keep working.
+        no_server = os.environ.get(
+            "VOICEPRANKS_NO_SERVER", os.environ.get("MINION_NO_SERVER")
+        )
+        if no_server != "1":
             self.control_server = ControlServer(self.engine)
             url = self.control_server.start()
             _log(f"[voicepranks] control API listening at {url}\n")
@@ -632,8 +639,16 @@ def _warn_if_broken_tk() -> None:
         )
 
 
+def _report_callback_exception(exc, val, tb) -> None:
+    """Tk invokes this on an uncaught exception inside a callback. The stock
+    handler writes the traceback to sys.stderr, which is None in a windowed
+    build -- the exact crash `_log` guards against -- so route through it."""
+    _log("".join(traceback.format_exception(exc, val, tb)))
+
+
 def run() -> None:
     _warn_if_broken_tk()
     root = tk.Tk()
+    root.report_callback_exception = _report_callback_exception
     VoicePranksApp(root)
     root.mainloop()

@@ -25,8 +25,16 @@ DEFAULT_PORT = 8765
 def main(argv=None) -> None:
     argv = sys.argv[1:] if argv is None else argv
 
-    host = os.environ.get("MINION_SERVER_HOST", DEFAULT_HOST)
-    port = int(os.environ.get("MINION_SERVER_PORT", str(DEFAULT_PORT)))
+    # `VOICEPRANKS_SERVER_*` are the current names; the `MINION_SERVER_*`
+    # aliases are honored for pre-rebrand launch scripts.
+    host = os.environ.get(
+        "VOICEPRANKS_SERVER_HOST",
+        os.environ.get("MINION_SERVER_HOST", DEFAULT_HOST),
+    )
+    port = int(os.environ.get(
+        "VOICEPRANKS_SERVER_PORT",
+        os.environ.get("MINION_SERVER_PORT", str(DEFAULT_PORT)),
+    ))
     if len(argv) >= 1:
         host = argv[0]
     if len(argv) >= 2:

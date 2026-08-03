@@ -29,9 +29,16 @@ DIST_NAME = "voicepranks"  # Windows folder / exe name
 # lets sounddevice locate the lib inside the frozen bundle.
 binaries = collect_dynamic_libs("_sounddevice_data")
 
+# Ship the control-server status page. It's a non-Python data file, so
+# PyInstaller won't pick it up from the import graph; without this the frozen
+# bundle serves no "/" page (control_server locates it via __file__, which
+# resolves to this bundled copy). dest keeps the package-relative layout.
+datas = [("voicepranks/webui/index.html", "voicepranks/webui")]
+
 a = Analysis(
     ["launcher.py"],
     binaries=binaries,
+    datas=datas,
 )
 
 pyz = PYZ(a.pure, a.zipped_data)
