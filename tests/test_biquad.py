@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.dsp.biquad import PeakingEQ
+from voicepranks.dsp.biquad import PeakingEQ
 
 SAMPLE_RATE = 48000
 BLOCK = 256

@@ -8,7 +8,7 @@ Holds the three audio devices the app routes between:
 - ``playback_device`` -- your speakers/headphones, used only for *listening*
                          (the Play button and the live monitor)
 
-Settings live in a small JSON file at ``~/.minion_voice/settings.json`` so
+Settings live in a small JSON file at ``~/.voicepranks/settings.json`` so
 they survive restarts and can be edited by hand outside the application.
 Each device is stored as ``{"index": int, "name": str}``; on load we prefer
 to re-resolve by *name* against the currently-available devices (indices can
@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-SETTINGS_DIR = Path.home() / ".minion_voice"
+SETTINGS_DIR = Path.home() / ".voicepranks"
 SETTINGS_PATH = SETTINGS_DIR / "settings.json"
 
 _DEVICE_KEYS = ("input_device", "output_device", "playback_device")

@@ -1,4 +1,4 @@
-# Build the Windows standalone bundle (dist\minion-voice\) and zip it.
+# Build the Windows standalone bundle (dist\voicepranks\) and zip it.
 #
 # Must run on Windows (PyInstaller can't cross-compile). From PowerShell:
 #   .\build-windows.ps1
@@ -7,7 +7,7 @@ Set-Location -Path $PSScriptRoot
 
 $Python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 $Venv = ".venv-build"
-# The bundle folder name is owned solely by minion-voice.spec; this script
+# The bundle folder name is owned solely by voicepranks.spec; this script
 # discovers whatever PyInstaller produced rather than re-hardcoding the name.
 
 Write-Host "==> Creating clean build venv ($Venv)"
@@ -21,14 +21,14 @@ $VenvPy = Join-Path $Venv "Scripts\python.exe"
 Write-Host "==> Running PyInstaller"
 if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
 if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }  # clean slate for the discovery below
-& $VenvPy -m PyInstaller minion-voice.spec --noconfirm
+& $VenvPy -m PyInstaller voicepranks.spec --noconfirm
 
 # Locate the one-folder bundle PyInstaller produced (name comes from the spec).
 $Built = @(Get-ChildItem -Path "dist" -Directory)
 if ($Built.Count -ne 1) { throw "Expected exactly one bundle folder in dist/, found $($Built.Count)" }
 
 Write-Host "==> Staging zip (folder + INSTALL.txt)"
-$Stage = "dist\minion-voice-windows"
+$Stage = "dist\voicepranks-windows"
 New-Item -ItemType Directory -Path $Stage | Out-Null
 Move-Item $Built[0].FullName $Stage  # move (not copy) — the zip is the deliverable
 Copy-Item "INSTALL.txt" $Stage

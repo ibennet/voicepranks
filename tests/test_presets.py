@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from minion_voice import presets
-from minion_voice.audio.engine import VoiceEngine
-from minion_voice.control_server import ControlServer
-from minion_voice.params import PARAM_SPECS_BY_NAME
+from voicepranks import presets
+from voicepranks.audio.engine import VoiceEngine
+from voicepranks.control_server import ControlServer
+from voicepranks.params import PARAM_SPECS_BY_NAME
 
 SAMPLE_RATE = 48000
 BLOCK = 256

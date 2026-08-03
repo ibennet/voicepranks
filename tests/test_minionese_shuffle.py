@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.dsp.effect import MinionEffect
-from minion_voice.dsp.minionese_shuffle import MinioneseShuffle
+from voicepranks.dsp.effect import MinionEffect
+from voicepranks.dsp.minionese_shuffle import MinioneseShuffle
 
 SAMPLE_RATE = 48000
 BLOCK = 256
@@ -82,8 +82,8 @@ def test_wobble_does_not_add_broadband_static():
     # A pure low tone has no content above 2 kHz, so significant HF energy in
     # the wobbled output is distortion (the delay-buffer starvation bug that
     # sounded like static). It must stay well below the signal.
-    from minion_voice.dsp.minionese_shuffle import _PitchWobble
-    from minion_voice.dsp.pitch import PitchShifter
+    from voicepranks.dsp.minionese_shuffle import _PitchWobble
+    from voicepranks.dsp.pitch import PitchShifter
 
     t = np.arange(int(SAMPLE_RATE * 2.0)) / SAMPLE_RATE
     tone = (0.5 * np.sin(2.0 * np.pi * 200.0 * t)).astype(np.float32)

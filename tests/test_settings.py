@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 
-from minion_voice import settings as settings_mod
-from minion_voice.audio.engine import VoiceEngine
+from voicepranks import settings as settings_mod
+from voicepranks.audio.engine import VoiceEngine
 
 INPUTS = [(1, "MacBook Mic"), (3, "USB Mic")]
 OUTPUTS = [(2, "Headphones"), (5, "BlackHole 2ch")]
@@ -86,7 +86,7 @@ def test_play_targets_playback_device(tmp_path, monkeypatch):
     def fake_play(buf, sr, device=None):
         captured["device"] = device
 
-    monkeypatch.setattr("minion_voice.audio.engine.sd.play", fake_play)
+    monkeypatch.setattr("voicepranks.audio.engine.sd.play", fake_play)
     engine.play("live")
     # Play must route to the listening device, not output_device.
     assert captured["device"] == 9

@@ -1,4 +1,4 @@
-"""Minimal tkinter GUI for the Minion Voice engine.
+"""Minimal tkinter GUI for the VoicePranks engine.
 
 Every tunable in `params.PARAM_SPECS` gets a generated slider/checkbox in
 a scrollable grid here, so the desktop UI never hardcodes the param list
@@ -24,6 +24,22 @@ from ..control_server import ControlServer
 from ..params import PARAM_SPECS, ParamSpec
 
 STATUS_REFRESH_MS = 250
+
+
+def _log(message: str) -> None:
+    """Write a diagnostic line to stderr, tolerating a missing stream.
+
+    In a PyInstaller windowed build on Windows there is no attached console,
+    so `sys.stderr` is None and a bare `.write()` raises AttributeError. Guard
+    it so logging is best-effort and never crashes the GUI on launch.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        stream.write(message)
+    except (OSError, ValueError):
+        pass
 
 GROUP_LABELS = {
     "global": "Global",
@@ -57,10 +73,10 @@ _SKIP_PARAM_NAMES = {
 _PRESET_NONE = "None"
 
 
-class MinionVoiceApp:
+class VoicePranksApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Minion Voice — voicepranks")
+        self.root.title("VoicePranks")
 
         self.engine = VoiceEngine()
         self.error_message: Optional[str] = None
@@ -73,7 +89,7 @@ class MinionVoiceApp:
         if os.environ.get("MINION_NO_SERVER") != "1":
             self.control_server = ControlServer(self.engine)
             url = self.control_server.start()
-            sys.stderr.write(f"[minion_voice] control API listening at {url}\n")
+            _log(f"[voicepranks] control API listening at {url}\n")
 
         # Device lists + persisted device selection (see settings.py). Loaded
         # before the widgets so the Settings dialog and engine start with the
@@ -392,7 +408,7 @@ class MinionVoiceApp:
         ttk.Label(
             body,
             text="Input/Output feed recording; Playback is only for listening.\n"
-            "Saved to ~/.minion_voice/settings.json.",
+            "Saved to ~/.voicepranks/settings.json.",
             foreground="#666",
             justify="left",
         ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 4))
@@ -605,8 +621,8 @@ def _warn_if_broken_tk() -> None:
     macOS. Warn loudly with the fix instead of leaving the user staring at an
     empty window."""
     if tk.TkVersion < 8.6:
-        sys.stderr.write(
-            "\n[minion_voice] WARNING: this Python is using Tk "
+        _log(
+            "\n[voicepranks] WARNING: this Python is using Tk "
             f"{tk.TkVersion}, which renders blank windows on modern macOS.\n"
             "  Fix: install a Python with a newer Tk, e.g.\n"
             "    brew install python-tk\n"
@@ -618,5 +634,5 @@ def _warn_if_broken_tk() -> None:
 def run() -> None:
     _warn_if_broken_tk()
     root = tk.Tk()
-    MinionVoiceApp(root)
+    VoicePranksApp(root)
     root.mainloop()

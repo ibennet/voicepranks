@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.dsp.pitch import PitchShifter
+from voicepranks.dsp.pitch import PitchShifter
 
 SAMPLE_RATE = 48000
 BLOCK = 256

@@ -1,6 +1,6 @@
 """Headless entrypoint: run the voice engine + HTTP control API with no UI.
 
-    python -m minion_voice.server
+    python -m voicepranks.server
 
 Starts the same `VoiceEngine` + `ControlServer` that the Tkinter app wires
 up, but with no window -- useful for running on a machine without a
@@ -36,7 +36,7 @@ def main(argv=None) -> None:
     server = ControlServer(engine)
     base_url = server.start(host=host, port=port)
 
-    print(f"minion_voice control server listening at {base_url}")
+    print(f"voicepranks control server listening at {base_url}")
     print("Endpoints:")
     print(f"  GET  {base_url}/api/state")
     print(f"  POST {base_url}/api/params            {{'name': value, ...}}")

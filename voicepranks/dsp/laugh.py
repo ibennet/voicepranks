@@ -5,7 +5,7 @@ randomly mixes it on top of the voice, ducking the voice a touch underneath it.
 Used by the "goofy" preset to punctuate speech with an occasional laugh.
 
 The laugh comes from a real audio clip when one is present at
-`minion_voice/assets/goofy_laugh.wav` (loaded once via the stdlib `wave` module
+`voicepranks/assets/goofy_laugh.wav` (loaded once via the stdlib `wave` module
 -- no MP3/ffmpeg dependency; resampled to the engine rate if needed). If that
 asset is absent, it falls back to a fully synthesized giggle so the feature
 still works with no bundled audio.

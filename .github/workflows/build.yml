@@ -1,6 +1,6 @@
 name: Build standalone bundles
 
-# Builds the double-clickable Minion Voice bundles for macOS and Windows.
+# Builds the double-clickable VoicePranks bundles for macOS and Windows.
 # - Push a version tag (e.g. v0.1.0) -> builds all platforms AND publishes a
 #   GitHub Release with the zips attached.
 # - Run manually from the Actions tab (workflow_dispatch) -> builds all
@@ -38,11 +38,11 @@ jobs:
       - name: Build bundle
         run: bash build-macos.sh  # via `bash` so it doesn't depend on the file's exec bit
       - name: Name the zip by arch
-        run: mv "dist/minion-voice-macos.zip" "dist/minion-voice-macos-${{ matrix.arch }}.zip"
+        run: mv "dist/voicepranks-macos.zip" "dist/voicepranks-macos-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: minion-voice-macos-${{ matrix.arch }}
-          path: dist/minion-voice-macos-${{ matrix.arch }}.zip
+          name: voicepranks-macos-${{ matrix.arch }}
+          path: dist/voicepranks-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   windows:
@@ -61,8 +61,8 @@ jobs:
         run: .\build-windows.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: minion-voice-windows-x64
-          path: dist/minion-voice-windows.zip
+          name: voicepranks-windows-x64
+          path: dist/voicepranks-windows.zip
           if-no-files-found: error
 
   release:

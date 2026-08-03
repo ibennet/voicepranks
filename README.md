@@ -1,4 +1,4 @@
-# voicepranks — Minion Voice Changer
+# VoicePranks — real-time voice changer
 
 Real-time "Minion voice" microphone filter for macOS and Windows, written in
 pure Python (numpy + sounddevice, hand-rolled DSP — no scipy/librosa).
@@ -28,7 +28,7 @@ Not a developer? Grab a prebuilt bundle and double-click it — no Python, no
    system driver): [BlackHole](https://existential.audio/blackhole/) on macOS,
    [VB-CABLE](https://vb-audio.com/Cable/) on Windows.
 2. **Unzip and open the app.** It's unsigned, so the OS warns you the first time:
-   - macOS: right-click `Minion Voice.app` → **Open** → **Open**.
+   - macOS: right-click `VoicePranks.app` → **Open** → **Open**.
    - Windows: on the SmartScreen prompt, **More info → Run anyway**.
 3. In Discord / Zoom / OBS, set the **microphone** to the virtual cable
    (BlackHole / CABLE Output).
@@ -53,7 +53,7 @@ pip install -r requirements.txt
 ## Run the GUI
 
 ```
-python -m minion_voice
+python -m voicepranks
 ```
 
 Toggle the effect on/off, choose a **Preset** from the dropdown, and open
@@ -71,7 +71,7 @@ a fresh effect with whatever settings are currently dialed in.
 ### Audio devices (Settings…)
 
 Three devices, configured in the **Settings** dialog and saved to
-`~/.minion_voice/settings.json` (editable outside the app):
+`~/.voicepranks/settings.json` (editable outside the app):
 
 - **Input mic** — the physical microphone to record/process from.
 - **Output mic** — the virtual cable other apps hear as a microphone
@@ -86,18 +86,18 @@ while the window is open. Set `MINION_NO_SERVER=1` to disable it.
 
 ## Live tuning over HTTP (control server)
 
-Every param in the registry (`minion_voice/params.py`) is readable/writable
+Every param in the registry (`voicepranks/params.py`) is readable/writable
 over a tiny stdlib-only JSON API, so you (or Claude, or a shell script) can
 tweak the sound *while the engine is running*, without touching the UI.
 
 Run it headless (no window, no display needed):
 
 ```
-python -m minion_voice.server
+python -m voicepranks.server
 ```
 
 This prints the base URL (default `http://127.0.0.1:8765`) and blocks. The
-Tkinter app (`python -m minion_voice`) starts the same server in a
+Tkinter app (`python -m voicepranks`) starts the same server in a
 background thread automatically, so `curl` and the sliders drive one shared
 engine and stay in sync -- an API-driven change shows up in the Tkinter
 sliders on their next status poll, and vice versa.
@@ -169,8 +169,8 @@ touch your input/output devices, on/off state, or the live monitor. Edit
 without any mic or virtual cable set up:
 
 ```
-python -m minion_voice.selftest out.wav
-python -m minion_voice.selftest in.wav out.wav --semitones 8 --eq-db 8
+python -m voicepranks.selftest out.wav
+python -m voicepranks.selftest in.wav out.wav --semitones 8 --eq-db 8
 ```
 
 If no input WAV is given, a 2-second synthetic test tone (200 Hz with a
@@ -204,7 +204,7 @@ pytest -q
 ## Project layout
 
 ```
-minion_voice/
+voicepranks/
   dsp/             pitch shifting, peaking EQ, intensity ramp, Minionese
                     gibberish mode, combined effect
   audio/           device discovery, WAV read/write, the real-time
@@ -214,6 +214,6 @@ minion_voice/
   webui/            minimal read-only status page served by the control API
   params.py         PARAM_SPECS -- single source of truth for every knob
   control_server.py stdlib HTTP JSON control API
-  server.py         headless entrypoint (`python -m minion_voice.server`)
+  server.py         headless entrypoint (`python -m voicepranks.server`)
   selftest.py       CLI WAV-file audition tool
 ```
