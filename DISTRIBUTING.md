@@ -37,6 +37,11 @@ Apple Silicon and Intel are separate builds — a bundle built on one arch runs 
 that arch (plus Rosetta for Intel-on-Apple-Silicon). Build on each, or on Apple
 Silicon target a universal Python if you need one binary for both.
 
+> **Note:** the automated GitHub Release ships an **Apple Silicon (arm64)**
+> macOS build only — the Intel CI job was dropped for build time. An arm64
+> bundle will not run on an Intel Mac (Rosetta only goes x86→arm, not the
+> reverse), so Intel users should build locally with the commands above.
+
 ### Windows (`dist\voicepranks\`)
 On a Windows machine (or CI runner), from PowerShell:
 
