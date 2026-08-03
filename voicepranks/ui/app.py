@@ -23,7 +23,7 @@ from .. import settings as settings_mod
 from ..audio.devices import list_input_devices, list_output_devices
 from ..audio.engine import VoiceEngine
 from ..control_server import ControlServer
-from ..params import PARAM_SPECS, ParamSpec
+from ..params import PARAM_SPECS, PARAM_SPECS_BY_NAME, ParamSpec
 
 STATUS_REFRESH_MS = 250
 
@@ -212,52 +212,37 @@ class VoicePranksApp:
 
     def _build_output_volume_row(self, frame: ttk.Frame, row: int) -> None:
         # Post-effect output level, always visible (not buried in the collapsed
-        # param grid) so a too-quiet preset can be boosted at a glance. Feeds
-        # the same `output_gain` engine param as the API, hence skipped from
-        # the generated grid (see `_SKIP_PARAM_NAMES`).
+        # param grid) so a too-quiet preset can be boosted at a glance. Built
+        # from the shared `_build_one_control` slider so the var, drag-guard,
+        # and status-poll sync wiring come for free (same as the generated
+        # grid) -- only the always-visible placement, the percent readout, and
+        # the Reset button are bespoke here. It's the same `output_gain` param
+        # as the API, skipped from the grid (see `_SKIP_PARAM_NAMES`).
         vframe = ttk.Frame(frame)
         vframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        ttk.Label(vframe, text="Output volume:").pack(side="left", padx=(0, 6))
-        self.output_gain_var = tk.DoubleVar(value=float(self.engine.output_gain))
-        scale = ttk.Scale(
-            vframe,
-            from_=0.0,
-            to=4.0,
-            orient="horizontal",
-            variable=self.output_gain_var,
-            command=self._on_output_gain,
-        )
-        scale.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        scale.bind("<ButtonPress-1>", lambda _e: self._dragging.__setitem__("output_gain", True))
-        scale.bind("<ButtonRelease-1>", lambda _e: self._dragging.__setitem__("output_gain", False))
-        self.output_gain_readout = ttk.Label(
-            vframe, text=self._format_gain(self.engine.output_gain), width=6
-        )
-        self.output_gain_readout.pack(side="left")
-        ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).pack(
-            side="left", padx=(6, 0)
+        vframe.columnconfigure(1, weight=1)  # let the slider stretch
+        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        self._build_one_control(vframe, spec, row=0)
+        # Show the level as a percentage instead of the generic "%.3g".
+        widget = self._param_widgets[spec.name]
+        widget["readout_fmt"] = self._format_gain
+        widget["readout"].config(text=self._format_gain(spec.default))
+        ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).grid(
+            row=0, column=3, padx=(6, 0)
         )
 
     @staticmethod
     def _format_gain(gain) -> str:
         return f"{int(round(float(gain) * 100))}%"
 
-    def _on_output_gain(self, value_str) -> None:
-        if self._suppress_commands:
-            return
-        try:
-            value = float(value_str)
-        except (TypeError, ValueError):
-            return
-        self.output_gain_readout.config(text=self._format_gain(value))
-        try:
-            self.engine.set_param("output_gain", value)
-        except Exception as exc:
-            self.error_message = f"Failed to set output volume: {exc}"
-
     def _on_output_gain_reset(self) -> None:
-        self.output_gain_var.set(1.0)  # fires the scale command -> applies + updates readout
-        self._on_output_gain(1.0)  # belt-and-suspenders in case the var set doesn't fire
+        # `var.set` moves the slider knob; the explicit `_on_param_slider` call
+        # then applies the value to the engine and refreshes the readout
+        # synchronously (the Scale's own command fires via the Tk event loop,
+        # so we can't rely on it having run by the time this returns).
+        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        self._param_widgets[spec.name]["var"].set(1.0)
+        self._on_param_slider(spec, 1.0)
 
     @staticmethod
     def _split_seconds(total: float) -> Tuple[int, int, float]:
@@ -390,7 +375,18 @@ class VoicePranksApp:
         readout.grid(row=row, column=2, sticky="w")
         scale.bind("<ButtonPress-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, True))
         scale.bind("<ButtonRelease-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, False))
-        self._param_widgets[spec.name] = {"kind": spec.kind, "var": var, "readout": readout, "spec": spec}
+        # `readout_fmt` lets a caller override the readout text (e.g. the
+        # always-visible Output volume row shows a percentage); None -> the
+        # default `_format_value`.
+        self._param_widgets[spec.name] = {
+            "kind": spec.kind, "var": var, "readout": readout, "spec": spec, "readout_fmt": None
+        }
+
+    def _readout_text(self, widget: dict, value) -> str:
+        """Format a slider's readout, honoring an optional per-widget
+        `readout_fmt` override (falls back to the generic `_format_value`)."""
+        fmt = widget.get("readout_fmt")
+        return fmt(value) if fmt else self._format_value(widget["spec"], value)
 
     @staticmethod
     def _format_value(spec: ParamSpec, value) -> str:
@@ -556,7 +552,7 @@ class VoicePranksApp:
             value = int(round(value))
         widget = self._param_widgets.get(spec.name)
         if widget is not None:
-            widget["readout"].config(text=self._format_value(spec, value))
+            widget["readout"].config(text=self._readout_text(widget, value))
         try:
             self.engine.set_param(spec.name, value)
         except Exception as exc:
@@ -636,24 +632,11 @@ class VoicePranksApp:
                         changed = True
                     if changed:
                         widget["var"].set(value)
-                        widget["readout"].config(text=self._format_value(widget["spec"], value))
+                        widget["readout"].config(text=self._readout_text(widget, value))
             # Keep the dedicated Live monitor checkbox in sync with
             # API-driven changes (it's not in the generated grid).
             if bool(self.monitor_var.get()) != bool(status.get("monitor", False)):
                 self.monitor_var.set(bool(status.get("monitor", False)))
-            # Same for the dedicated Output volume slider (driven by the
-            # `output_gain` param, so a preset or API call can move it), unless
-            # the user is mid-drag.
-            if not self._dragging.get("output_gain"):
-                gain = snapshot.get("output_gain")
-                if gain is not None:
-                    try:
-                        changed = abs(float(self.output_gain_var.get()) - float(gain)) > 1e-9
-                    except (TypeError, ValueError):
-                        changed = True
-                    if changed:
-                        self.output_gain_var.set(float(gain))
-                        self.output_gain_readout.config(text=self._format_gain(gain))
         finally:
             self._suppress_commands = False
 
