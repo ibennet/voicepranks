@@ -23,7 +23,7 @@ from .. import settings as settings_mod
 from ..audio.devices import list_input_devices, list_output_devices
 from ..audio.engine import VoiceEngine
 from ..control_server import ControlServer
-from ..params import PARAM_SPECS, ParamSpec
+from ..params import PARAM_SPECS, PARAM_SPECS_BY_NAME, ParamSpec
 
 STATUS_REFRESH_MS = 250
 
@@ -67,6 +67,7 @@ GROUP_ORDER = [
 _SKIP_PARAM_NAMES = {
     "enabled",
     "monitor",
+    "output_gain",  # dedicated always-visible Output volume row instead of a slider
     "ramp.duration_s",  # dedicated H/M/S row instead of a slider
     "io.input_device",
     "io.output_device",
@@ -118,7 +119,7 @@ class VoicePranksApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(0, weight=1)
 
         # -- top bar: Turn On | Settings… | Preset dropdown ------------------
@@ -138,14 +139,15 @@ class VoicePranksApp:
 
         self._build_recorder_row(frame, row=1)
         self._build_ramp_row(frame, row=2)
+        self._build_output_volume_row(frame, row=3)
 
         ttk.Label(frame, text="Parameters (click a section to expand)").grid(
-            row=3, column=0, sticky="w", pady=(6, 0)
+            row=4, column=0, sticky="w", pady=(6, 0)
         )
 
         # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=4, column=0, sticky="nsew", pady=(2, 8))
+        scroll_container.grid(row=5, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -165,7 +167,7 @@ class VoicePranksApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -207,6 +209,45 @@ class VoicePranksApp:
         ttk.Button(rframe, text="Set", command=self._on_ramp_set).pack(side="left", padx=(4, 0))
         ttk.Button(rframe, text="Clear (no ramp)", command=self._on_ramp_clear).pack(side="left", padx=4)
         self._populate_ramp_fields()
+
+    def _build_output_volume_row(self, frame: ttk.Frame, row: int) -> None:
+        # Post-effect output level, always visible (not buried in the collapsed
+        # param grid) so a too-quiet preset can be boosted at a glance. Built
+        # from the shared `_build_one_control` slider so the var, drag-guard,
+        # and status-poll sync wiring come for free (same as the generated
+        # grid) -- only the always-visible placement, the percent readout, and
+        # the Reset button are bespoke here. It's the same `output_gain` param
+        # as the API, skipped from the grid (see `_SKIP_PARAM_NAMES`).
+        vframe = ttk.Frame(frame)
+        vframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        vframe.columnconfigure(1, weight=1)  # let the slider stretch
+        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        self._build_one_control(vframe, spec, row=0)
+        # Show the level as a percentage instead of the generic "%.3g", and
+        # seed from the live engine value (not spec.default) so an out-of-band
+        # change made before this window built -- e.g. via the control API,
+        # which starts before the widgets -- shows correctly rather than 100%
+        # until the first status poll.
+        widget = self._param_widgets[spec.name]
+        widget["readout_fmt"] = self._format_gain
+        widget["var"].set(float(self.engine.output_gain))
+        widget["readout"].config(text=self._format_gain(self.engine.output_gain))
+        ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).grid(
+            row=0, column=3, padx=(6, 0)
+        )
+
+    @staticmethod
+    def _format_gain(gain) -> str:
+        return f"{int(round(float(gain) * 100))}%"
+
+    def _on_output_gain_reset(self) -> None:
+        # `var.set` moves the slider knob; the explicit `_on_param_slider` call
+        # then applies the value to the engine and refreshes the readout
+        # synchronously (the Scale's own command fires via the Tk event loop,
+        # so we can't rely on it having run by the time this returns).
+        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        self._param_widgets[spec.name]["var"].set(1.0)
+        self._on_param_slider(spec, 1.0)
 
     @staticmethod
     def _split_seconds(total: float) -> Tuple[int, int, float]:
@@ -339,7 +380,18 @@ class VoicePranksApp:
         readout.grid(row=row, column=2, sticky="w")
         scale.bind("<ButtonPress-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, True))
         scale.bind("<ButtonRelease-1>", lambda _e, n=spec.name: self._dragging.__setitem__(n, False))
-        self._param_widgets[spec.name] = {"kind": spec.kind, "var": var, "readout": readout, "spec": spec}
+        # `readout_fmt` lets a caller override the readout text (e.g. the
+        # always-visible Output volume row shows a percentage); None -> the
+        # default `_format_value`.
+        self._param_widgets[spec.name] = {
+            "kind": spec.kind, "var": var, "readout": readout, "spec": spec, "readout_fmt": None
+        }
+
+    def _readout_text(self, widget: dict, value) -> str:
+        """Format a slider's readout, honoring an optional per-widget
+        `readout_fmt` override (falls back to the generic `_format_value`)."""
+        fmt = widget.get("readout_fmt")
+        return fmt(value) if fmt else self._format_value(widget["spec"], value)
 
     @staticmethod
     def _format_value(spec: ParamSpec, value) -> str:
@@ -505,7 +557,7 @@ class VoicePranksApp:
             value = int(round(value))
         widget = self._param_widgets.get(spec.name)
         if widget is not None:
-            widget["readout"].config(text=self._format_value(spec, value))
+            widget["readout"].config(text=self._readout_text(widget, value))
         try:
             self.engine.set_param(spec.name, value)
         except Exception as exc:
@@ -585,7 +637,7 @@ class VoicePranksApp:
                         changed = True
                     if changed:
                         widget["var"].set(value)
-                        widget["readout"].config(text=self._format_value(widget["spec"], value))
+                        widget["readout"].config(text=self._readout_text(widget, value))
             # Keep the dedicated Live monitor checkbox in sync with
             # API-driven changes (it's not in the generated grid).
             if bool(self.monitor_var.get()) != bool(status.get("monitor", False)):

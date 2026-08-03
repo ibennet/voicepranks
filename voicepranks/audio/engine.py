@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import threading
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import sounddevice as sd
@@ -107,6 +107,12 @@ class VoiceEngine:
         self.ring = _RingBuffer(ring_capacity)
 
         self.enabled = False
+        # Output-mic level: a linear multiplier applied to the processed signal
+        # on its way to the output ring (the virtual cable other apps hear)
+        # ONLY -- not the live monitor or recorded takes. Lets a too-quiet
+        # preset be sent hot to other apps without re-tuning its DSP or changing
+        # what you monitor. 1.0 = unity, >1.0 boosts, 0.0 = silence.
+        self.output_gain = 1.0
         self._manual_intensity: Optional[float] = None
         # Last intensity pushed to the effect from the callback, so a constant
         # intensity (e.g. after the ramp settles) doesn't re-derive every
@@ -411,6 +417,11 @@ class VoiceEngine:
         """Override the auto-ramp with a fixed intensity (e.g. slider drag)."""
         self._manual_intensity = min(max(float(t), 0.0), 1.0)
 
+    def set_output_gain(self, gain: float) -> None:
+        """Set the post-effect output level (linear multiplier). Clamped at 0
+        (no negatives); no upper bound so a quiet preset can be pushed hot."""
+        self.output_gain = max(0.0, float(gain))
+
     def restart_ramp(self, duration_s: Optional[float] = None) -> None:
         """Restart the intensity ramp from 0 with the current (or given)
         duration, handing intensity control back to the ramp (clears any
@@ -567,6 +578,9 @@ class VoiceEngine:
         fresh.set_intensity(float(values.get("intensity", 1.0)))
 
         out = _process_in_blocks(fresh, self._raw_take, blocksize=self.blocksize)
+        # No output-volume trim here: that trims only the output mic, and the
+        # re-rendered take is played to your listening device (Play), not the
+        # virtual cable.
         self._rendered_take = out
         return out
 
@@ -599,6 +613,15 @@ class VoiceEngine:
 
     # -- stream callbacks ------------------------------------------------
 
+    @staticmethod
+    def _rms_peak(sig: np.ndarray) -> Tuple[float, float]:
+        """(rms, peak) of a block as plain floats, or (0.0, 0.0) when empty.
+        Shared by the dry-input and output-mic level meters."""
+        if sig.size:
+            s64 = sig.astype(np.float64)
+            return float(np.sqrt(np.mean(s64 ** 2))), float(np.max(np.abs(s64)))
+        return 0.0, 0.0
+
     def _input_callback(self, indata, frames, time_info, status) -> None:  # noqa: D401
         try:
             self._drain_pending()
@@ -606,13 +629,7 @@ class VoiceEngine:
             mono = indata[:, 0] if indata.ndim > 1 else indata
             mono = np.asarray(mono, dtype=np.float32)
 
-            if mono.size:
-                dry64 = mono.astype(np.float64)
-                self._dry_rms = float(np.sqrt(np.mean(dry64 ** 2)))
-                self._dry_peak = float(np.max(np.abs(dry64)))
-            else:
-                self._dry_rms = 0.0
-                self._dry_peak = 0.0
+            self._dry_rms, self._dry_peak = self._rms_peak(mono)
 
             if self.enabled:
                 t = self._manual_intensity if self._manual_intensity is not None else self.ramp.current()
@@ -627,7 +644,9 @@ class VoiceEngine:
             # (the real-time effect result, replayed verbatim by Play) and
             # the dry mic (for optional re-render). The effect emits a
             # variable number of samples per block, so the live take is the
-            # concatenation of exactly what went out.
+            # concatenation of exactly what went out. Captured pre-gain: Output
+            # volume trims only the output mic (below), and Play routes takes to
+            # your listening device, which that trim must not touch.
             if self._recording:
                 with self._record_lock:
                     if self._recording:
@@ -635,17 +654,22 @@ class VoiceEngine:
                         if processed.size:
                             self._live_chunks.append(np.asarray(processed, dtype=np.float32).copy())
 
-            if processed.size:
-                proc64 = processed.astype(np.float64)
-                self._proc_rms = float(np.sqrt(np.mean(proc64 ** 2)))
-                self._proc_peak = float(np.max(np.abs(proc64)))
-            else:
-                self._proc_rms = 0.0
-                self._proc_peak = 0.0
+            # Output volume trims ONLY the output mic (the virtual cable other
+            # apps hear), leaving the live monitor and recorded takes at their
+            # natural level -- so a quiet preset can be sent hot to other apps
+            # without changing what you monitor. Applied just before the ring.
+            out_mic = processed
+            if self.output_gain != 1.0 and processed.size:
+                out_mic = processed * np.float32(self.output_gain)
 
-            self.ring.write(processed)
-            # Feed the live monitor the same processed audio (its own ring so
-            # the two output streams don't consume each other's samples).
+            # Meter the output-mic signal (post-gain) so the "out" level shows
+            # what other apps actually receive, revealing clipping when the
+            # volume is pushed hot.
+            self._proc_rms, self._proc_peak = self._rms_peak(out_mic)
+
+            self.ring.write(out_mic)
+            # Feed the live monitor the ungained processed audio (its own ring
+            # so the two output streams don't consume each other's samples).
             if self.monitor_enabled and self.monitor_stream is not None:
                 self.monitor_ring.write(processed)
         except Exception as exc:  # keep the audio thread alive
