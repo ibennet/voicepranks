@@ -67,6 +67,7 @@ GROUP_ORDER = [
 _SKIP_PARAM_NAMES = {
     "enabled",
     "monitor",
+    "output_gain",  # dedicated always-visible Output volume row instead of a slider
     "ramp.duration_s",  # dedicated H/M/S row instead of a slider
     "io.input_device",
     "io.output_device",
@@ -118,7 +119,7 @@ class VoicePranksApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(5, weight=1)
         frame.columnconfigure(0, weight=1)
 
         # -- top bar: Turn On | Settings… | Preset dropdown ------------------
@@ -138,14 +139,15 @@ class VoicePranksApp:
 
         self._build_recorder_row(frame, row=1)
         self._build_ramp_row(frame, row=2)
+        self._build_output_volume_row(frame, row=3)
 
         ttk.Label(frame, text="Parameters (click a section to expand)").grid(
-            row=3, column=0, sticky="w", pady=(6, 0)
+            row=4, column=0, sticky="w", pady=(6, 0)
         )
 
         # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=4, column=0, sticky="nsew", pady=(2, 8))
+        scroll_container.grid(row=5, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -165,7 +167,7 @@ class VoicePranksApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=5, column=0, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -207,6 +209,55 @@ class VoicePranksApp:
         ttk.Button(rframe, text="Set", command=self._on_ramp_set).pack(side="left", padx=(4, 0))
         ttk.Button(rframe, text="Clear (no ramp)", command=self._on_ramp_clear).pack(side="left", padx=4)
         self._populate_ramp_fields()
+
+    def _build_output_volume_row(self, frame: ttk.Frame, row: int) -> None:
+        # Post-effect output level, always visible (not buried in the collapsed
+        # param grid) so a too-quiet preset can be boosted at a glance. Feeds
+        # the same `output_gain` engine param as the API, hence skipped from
+        # the generated grid (see `_SKIP_PARAM_NAMES`).
+        vframe = ttk.Frame(frame)
+        vframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Label(vframe, text="Output volume:").pack(side="left", padx=(0, 6))
+        self.output_gain_var = tk.DoubleVar(value=float(self.engine.output_gain))
+        scale = ttk.Scale(
+            vframe,
+            from_=0.0,
+            to=4.0,
+            orient="horizontal",
+            variable=self.output_gain_var,
+            command=self._on_output_gain,
+        )
+        scale.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        scale.bind("<ButtonPress-1>", lambda _e: self._dragging.__setitem__("output_gain", True))
+        scale.bind("<ButtonRelease-1>", lambda _e: self._dragging.__setitem__("output_gain", False))
+        self.output_gain_readout = ttk.Label(
+            vframe, text=self._format_gain(self.engine.output_gain), width=6
+        )
+        self.output_gain_readout.pack(side="left")
+        ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).pack(
+            side="left", padx=(6, 0)
+        )
+
+    @staticmethod
+    def _format_gain(gain) -> str:
+        return f"{int(round(float(gain) * 100))}%"
+
+    def _on_output_gain(self, value_str) -> None:
+        if self._suppress_commands:
+            return
+        try:
+            value = float(value_str)
+        except (TypeError, ValueError):
+            return
+        self.output_gain_readout.config(text=self._format_gain(value))
+        try:
+            self.engine.set_param("output_gain", value)
+        except Exception as exc:
+            self.error_message = f"Failed to set output volume: {exc}"
+
+    def _on_output_gain_reset(self) -> None:
+        self.output_gain_var.set(1.0)  # fires the scale command -> applies + updates readout
+        self._on_output_gain(1.0)  # belt-and-suspenders in case the var set doesn't fire
 
     @staticmethod
     def _split_seconds(total: float) -> Tuple[int, int, float]:
@@ -590,6 +641,19 @@ class VoicePranksApp:
             # API-driven changes (it's not in the generated grid).
             if bool(self.monitor_var.get()) != bool(status.get("monitor", False)):
                 self.monitor_var.set(bool(status.get("monitor", False)))
+            # Same for the dedicated Output volume slider (driven by the
+            # `output_gain` param, so a preset or API call can move it), unless
+            # the user is mid-drag.
+            if not self._dragging.get("output_gain"):
+                gain = snapshot.get("output_gain")
+                if gain is not None:
+                    try:
+                        changed = abs(float(self.output_gain_var.get()) - float(gain)) > 1e-9
+                    except (TypeError, ValueError):
+                        changed = True
+                    if changed:
+                        self.output_gain_var.set(float(gain))
+                        self.output_gain_readout.config(text=self._format_gain(gain))
         finally:
             self._suppress_commands = False
 

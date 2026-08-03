@@ -107,6 +107,11 @@ class VoiceEngine:
         self.ring = _RingBuffer(ring_capacity)
 
         self.enabled = False
+        # Post-effect output level (linear multiplier on the processed signal
+        # before it hits the output ring, the live monitor, and the recorded
+        # take). Lets a too-quiet preset be boosted without re-tuning its DSP;
+        # 1.0 = unity, >1.0 boosts, 0.0 = silence.
+        self.output_gain = 1.0
         self._manual_intensity: Optional[float] = None
         # Last intensity pushed to the effect from the callback, so a constant
         # intensity (e.g. after the ramp settles) doesn't re-derive every
@@ -411,6 +416,11 @@ class VoiceEngine:
         """Override the auto-ramp with a fixed intensity (e.g. slider drag)."""
         self._manual_intensity = min(max(float(t), 0.0), 1.0)
 
+    def set_output_gain(self, gain: float) -> None:
+        """Set the post-effect output level (linear multiplier). Clamped at 0
+        (no negatives); no upper bound so a quiet preset can be pushed hot."""
+        self.output_gain = max(0.0, float(gain))
+
     def restart_ramp(self, duration_s: Optional[float] = None) -> None:
         """Restart the intensity ramp from 0 with the current (or given)
         duration, handing intensity control back to the ramp (clears any
@@ -567,6 +577,10 @@ class VoiceEngine:
         fresh.set_intensity(float(values.get("intensity", 1.0)))
 
         out = _process_in_blocks(fresh, self._raw_take, blocksize=self.blocksize)
+        # Match the live path: apply the current output level so an A/B
+        # re-render sounds as loud as what the engine is sending out.
+        if self.output_gain != 1.0 and out.size:
+            out = out * np.float32(self.output_gain)
         self._rendered_take = out
         return out
 
@@ -622,6 +636,12 @@ class VoiceEngine:
                 processed = self.effect.process(mono)
             else:
                 processed = mono
+
+            # Apply the output level after the effect (and after dry
+            # passthrough) so the recorded take, the "out" meter, the virtual
+            # cable, and the live monitor all reflect what actually goes out.
+            if self.output_gain != 1.0 and processed.size:
+                processed = processed * np.float32(self.output_gain)
 
             # Capture both takes under one lock: the live processed output
             # (the real-time effect result, replayed verbatim by Play) and

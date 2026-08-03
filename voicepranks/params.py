@@ -44,6 +44,7 @@ PARAM_SPECS = [
     ParamSpec("enabled", "global", "Enabled", "bool", 0, 1, 1, False),
     ParamSpec("gibberish", "global", "Minionese (gibberish)", "bool", 0, 1, 1, False),
     ParamSpec("intensity", "global", "Intensity (manual)", "float", 0.0, 1.0, 0.01, 1.0),
+    ParamSpec("output_gain", "global", "Output volume", "float", 0.0, 4.0, 0.05, 1.0),
     ParamSpec("monitor", "global", "Live monitor (hear effect)", "bool", 0, 1, 1, False),
     ParamSpec("ramp.duration_s", "global", "Ramp duration (s)", "float", 0.0, 86400.0, 1.0, IntensityRamp().duration_s),
 
@@ -325,6 +326,10 @@ def build_engine_registry(engine) -> Dict[str, ParamHandlers]:
                 engine._manual_intensity if engine._manual_intensity is not None else engine.effect.intensity
             ),
             set=lambda v: engine.set_manual_intensity(float(v)),
+        ),
+        "output_gain": ParamHandlers(
+            get=lambda: engine.output_gain,
+            set=lambda v: engine.set_output_gain(float(v)),
         ),
         "monitor": ParamHandlers(
             get=lambda: engine.monitor_enabled,
