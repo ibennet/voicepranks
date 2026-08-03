@@ -193,18 +193,33 @@ class VoiceEngine:
                 self._pending[name] = value
 
     def snapshot(self) -> dict:
-        """Return the current value of every registered param."""
-        return {name: handlers.get() for name, handlers in self._registry.items()}
+        """Return the current value of every registered param.
+
+        Params queued by `set_param` (stashed in `_pending` while the engine is
+        running, applied on the next audio block) are reflected here too, so a
+        snapshot never lags a value that was just set -- e.g. saving settings or
+        reading `/api/state` right after applying a preset returns the intended
+        values, not the pre-change ones."""
+        snap = {name: handlers.get() for name, handlers in self._registry.items()}
+        with self._param_lock:
+            for name, value in self._pending.items():
+                if name in snap:
+                    snap[name] = value
+        return snap
+
+    def apply_params(self, mapping: dict) -> dict:
+        """Feed each `{param: value}` in `mapping` through `set_param`. Works
+        whether the engine is running or stopped. Returns the full snapshot."""
+        for name, value in mapping.items():
+            self.set_param(name, value)
+        return self.snapshot()
 
     def apply_preset(self, name: str) -> dict:
         """Apply a built-in preset (see `presets.PRESETS`): feed each of its
         sound-character params through `set_param`. Works whether the engine
         is running or stopped. Returns the resulting full snapshot. Raises
         KeyError for an unknown preset name."""
-        preset = presets_mod.get_preset(name)
-        for pname, value in preset.items():
-            self.set_param(pname, value)
-        return self.snapshot()
+        return self.apply_params(presets_mod.get_preset(name))
 
     def _drain_pending(self) -> None:
         """Apply any params queued by `set_param` since the last block.
