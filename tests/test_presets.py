@@ -19,7 +19,7 @@ BLOCK = 256
 
 
 def test_both_builtin_presets_exist():
-    assert presets.preset_names() == ["animalese", "minion"]
+    assert presets.preset_names() == ["animalese", "minion", "scary", "goofy"]
 
 
 def test_apply_animalese_sets_scramble_values():
@@ -39,6 +39,75 @@ def test_apply_minion_sets_connected_values():
     assert snap["shuffle.shuffle_k"] == 1
     assert snap["shuffle.reverse_prob"] == 0.0
     assert snap["shuffle.wobble_ms"] == 4.0
+
+
+def test_apply_scary_sets_deep_growl_values():
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.apply_preset("scary")
+    snap = engine.snapshot()
+    # Non-gibberish -- transforms real speech via the plain path.
+    assert snap["gibberish"] is False
+    # Deeper: a *negative* pitch shift (down, not the usual chipmunk up).
+    assert snap["effect.max_semitones"] < 0.0
+    # Grit + space are switched on.
+    assert snap["distortion.enabled"] is True
+    assert snap["distortion.drive"] > 1.0
+    assert snap["reverb.enabled"] is True
+    assert snap["reverb.mix"] > 0.0
+
+
+def test_apply_goofy_sets_laugh_and_warble_values():
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.apply_preset("goofy")
+    snap = engine.snapshot()
+    assert snap["gibberish"] is False
+    assert snap["effect.max_semitones"] < 0.0  # deep, stable down-shift
+    assert snap["effect.nasality"] > 0.0       # nasal honk
+    assert snap["growl.enabled"] is True       # the warble
+    assert snap["distortion.enabled"] is True  # gravel/grit
+    assert snap["reverb.enabled"] is False
+    # The laugh is an independent toggle now -- goofy does not force it on/off.
+    assert "laugh.enabled" not in presets.get_preset("goofy")
+
+
+def test_switching_plain_presets_does_not_leak_enable_flags():
+    # Regression: presets only set the params they list, so a plain-path preset
+    # must explicitly set every enable flag or the previous preset's stages leak
+    # through. scary enables distortion/reverb; goofy must turn reverb back off.
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+
+    engine.apply_preset("scary")
+    assert engine.snapshot()["reverb.enabled"] is True
+
+    engine.apply_preset("goofy")
+    assert engine.snapshot()["reverb.enabled"] is False   # did NOT leak from scary
+
+    engine.apply_preset("scary")
+    assert engine.snapshot()["reverb.enabled"] is True
+
+
+def test_laugh_toggle_is_independent_of_presets():
+    # The laugh is a top-level overlay controlled only by its own toggle, so
+    # applying presets never turns it on or off.
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.set_param("laugh.enabled", True)
+    for name in ("scary", "goofy", "minion", "animalese"):
+        engine.apply_preset(name)
+        assert engine.snapshot()["laugh.enabled"] is True, f"{name} clobbered the laugh toggle"
+
+
+def test_gibberish_preset_clears_plain_path_effects():
+    # Regression: apply "scary" (plain-path distortion/reverb on), then a
+    # gibberish preset, then untoggle gibberish -- the plain voice must be
+    # clean, NOT the leftover scary effects.
+    engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
+    engine.apply_preset("scary")
+    engine.apply_preset("minion")
+    engine.set_param("gibberish", False)  # user unchecks the toggle
+    snap = engine.snapshot()
+    assert snap["distortion.enabled"] is False
+    assert snap["reverb.enabled"] is False
+    assert snap["effect.nasality"] == 0.0
 
 
 def test_unknown_preset_raises():
@@ -109,7 +178,7 @@ def test_api_lists_and_applies_presets(server):
 
     status, data = _get(base_url, "/api/presets")
     assert status == 200
-    assert data["names"] == ["animalese", "minion"]
+    assert data["names"] == ["animalese", "minion", "scary", "goofy"]
 
     status, data = _post(base_url, "/api/presets/apply", {"name": "minion"})
     assert status == 200 and data["ok"] is True

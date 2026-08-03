@@ -27,11 +27,32 @@ _EXCLUDED_PREFIXES = ("io.",)
 # reset it (they scale under it instead).
 _EXCLUDED_NAMES = {"enabled", "monitor", "intensity"}
 
+# Neutral/off values for every plain-path (non-gibberish) control. Gibberish
+# presets spread this in so they leave NO stale plain-voice effects behind:
+# without it, applying e.g. "scary" (which enables distortion/reverb) and then
+# a gibberish preset would leave those on, and toggling gibberish off would
+# surface the old scary voice instead of a clean one.
+# The laugh is intentionally NOT here: it's a top-level overlay with its own
+# toggle, independent of presets, so it persists across preset changes.
+_PLAIN_OFF = {
+    "effect.max_semitones": 0.0,
+    "effect.eq_enabled": False,
+    "effect.nasality": 0.0,
+    "growl.enabled": False,
+    "distortion.enabled": False,
+    "reverb.enabled": False,
+}
+
 
 PRESETS: Dict[str, Dict] = {
     # Chopped / blippy / scrambled -- discrete staccato syllable blips, the
     # Animal-Crossing-villager sound.
     "animalese": {
+        **_PLAIN_OFF,
+        # Plain-path voice (when gibberish is toggled off): a clean pitch-up
+        # mirroring the gibberish pitch, so the toggle switches between
+        # "babble" and "high voice" rather than doing nothing.
+        "effect.max_semitones": 5.5,
         "gibberish": True,
         "minionese.use_shuffle": True,
         "shuffle.semitones": 5.5,
@@ -46,9 +67,12 @@ PRESETS: Dict[str, Dict] = {
     # Connected / pitched / lilting -- no scramble, so speech stays flowing;
     # a moderate pitch-up plus sing-song wobble reads as "Minion".
     "minion": {
+        **_PLAIN_OFF,
+        # Plain-path voice (gibberish off): a clean pitch-up "minion" voice.
+        "effect.max_semitones": 8.0,
         "gibberish": True,
         "minionese.use_shuffle": True,
-        "shuffle.semitones": 10.0,
+        "shuffle.semitones": 8.0,
         "shuffle.wobble_ms": 4.0,
         "shuffle.chunk_ms": 150.0,
         "shuffle.shuffle_k": 1,
@@ -56,6 +80,53 @@ PRESETS: Dict[str, Dict] = {
         "shuffle.reverse_prob": 0.0,
         "shuffle.nasality": 0.7,
         "shuffle.max_slew": 1.0,
+    },
+    # Deep / harsh / gravelly monster -- NOT gibberish: it transforms your
+    # real speech (via the plain pitch path). A downward pitch shift drops it
+    # (formants drop too -> bigger/darker), an upper-mid EQ bump adds bite, a
+    # ring-mod "growl" adds gnarly roughness, a hard-clipping distortion rips
+    # it up, and a dense but restrained dark reverb sets it in a space without
+    # drowning the grit. Pitch depth still scales under the live intensity.
+    "scary": {
+        **_PLAIN_OFF,  # start from the neutral baseline, then turn on what we need
+        "gibberish": False,
+        "effect.max_semitones": -7.0,
+        "effect.eq_enabled": True,
+        "effect.eq_gain_db": 6.0,
+        "effect.eq_center_hz": 2500.0,
+        "effect.eq_q": 1.1,
+        "growl.enabled": True,
+        "growl.rate_hz": 70.0,
+        "growl.depth": 0.55,
+        "distortion.enabled": True,
+        "distortion.drive": 11.0,
+        "reverb.enabled": True,
+        "reverb.mix": 0.22,
+        "reverb.room_size": 0.6,
+        "reverb.damp": 0.6,
+    },
+    # Goofy -- deep, gravelly, resonant drawl that randomly punctuates your
+    # speech with a silly laugh. A big *fixed* downward pitch shift makes it
+    # deep (stable -- no real-time tracking, so no octave jumps or wandering
+    # pitch), a low-frequency EQ boost adds resonant body, a hard-clip
+    # distortion adds gravel/grit, and a slow growl adds a loose warble. Not
+    # gibberish -- your real words come through; everything scales with intensity.
+    "goofy": {
+        **_PLAIN_OFF,  # start from the neutral baseline, then turn on what we need
+        "gibberish": False,
+        "effect.max_semitones": -6.0,   # deep but not too low, STABLE (no tracking)
+        "effect.eq_enabled": True,
+        "effect.eq_gain_db": 7.0,
+        "effect.eq_center_hz": 220.0,   # deep resonant low-mid body
+        "effect.eq_q": 1.0,
+        "effect.nasality": 0.85,        # strong nasal honk
+        "growl.enabled": True,
+        "growl.rate_hz": 5.5,           # slow loose warble
+        "growl.depth": 0.28,
+        "distortion.enabled": True,     # gravelly grit
+        "distortion.drive": 6.0,
+        # reverb stays off (from _PLAIN_OFF). The laugh is an independent
+        # toggle ("Random laugh"), not part of any preset.
     },
 }
 
