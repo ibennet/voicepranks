@@ -452,14 +452,12 @@ class VoicePranksApp:
 
         def combo_for(devices, current_idx):
             values = ["(default)"] + [f"{idx}: {name}" for idx, name in devices]
-            var = tk.StringVar()
-            cb = ttk.Combobox(body, textvariable=var, values=values, state="readonly", width=34)
-            # Keep a reference to the StringVar alive on the widget. Without
-            # this, `var` is a local that CPython garbage-collects the moment
-            # this function returns, which unsets the linked Tcl variable and
-            # blanks the combobox display -- so a saved device would no longer
-            # appear selected when the dialog is reopened.
-            cb._device_var = var
+            # No `textvariable`: a readonly combobox holds its own selection
+            # (set via `cb.current()`, read back in `parse` via `cb.current()`).
+            # A linked StringVar here would only be a local that CPython
+            # garbage-collects on return, unsetting the Tcl variable and
+            # blanking the display -- so we deliberately don't use one.
+            cb = ttk.Combobox(body, values=values, state="readonly", width=34)
             sel = 0
             for i, (idx, _name) in enumerate(devices):
                 if idx == current_idx:
@@ -468,10 +466,18 @@ class VoicePranksApp:
             cb.current(sel)
             return cb
 
+        # Preselect each dropdown from the user's persisted choice (resolved
+        # against the current device list), NOT from engine.*: once the engine
+        # has started, engine.start() overwrites engine.output_device with the
+        # auto-resolved virtual cable, which would otherwise show here as an
+        # explicit selection instead of "(default)".
+        resolved = settings_mod.resolve_all(
+            self.settings, self._input_devices, self._output_devices
+        )
         rows = [
-            ("Input mic (record from)", self._input_devices, self.engine.input_device),
-            ("Output mic (to other apps)", self._output_devices, self.engine.output_device),
-            ("Output playback (listen)", self._output_devices, self.engine.playback_device),
+            ("Input mic (record from)", self._input_devices, resolved["input_device"]),
+            ("Output mic (to other apps)", self._output_devices, resolved["output_device"]),
+            ("Output playback (listen)", self._output_devices, resolved["playback_device"]),
         ]
         combos = {}
         for r, (label, devices, current) in enumerate(rows):
