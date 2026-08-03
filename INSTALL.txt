@@ -1,0 +1,53 @@
+Minion Voice — how to run it
+============================
+
+Minion Voice turns your microphone into a chipmunk/minion voice in real time,
+and sends it to a "virtual microphone" that apps like Discord, Zoom, and OBS
+can use.
+
+You need TWO free things: (1) this app, and (2) a virtual audio cable.
+You also need a real microphone.
+
+
+STEP 1 — Install the free virtual audio cable
+---------------------------------------------
+This is a small driver that Minion Voice sends its audio into. It is NOT part
+of this download and must be installed once.
+
+  macOS:    BlackHole  ->  https://existential.audio/blackhole/
+  Windows:  VB-CABLE   ->  https://vb-audio.com/Cable/
+
+macOS note: after installing BlackHole it may not appear until you restart the
+audio system. Run this in Terminal (or just reboot):
+  sudo killall coreaudiod
+
+
+STEP 2 — Open Minion Voice
+--------------------------
+Because this app is not code-signed, your OS will warn you the first time.
+That's expected for a free app like this.
+
+  macOS:    Right-click "Minion Voice.app" -> Open -> Open.
+            (Or run:  xattr -dr com.apple.quarantine "Minion Voice.app")
+
+  Windows:  Double-click minion-voice.exe. If SmartScreen appears,
+            click "More info" -> "Run anyway".
+
+The first time on macOS, allow microphone access when prompted.
+
+
+STEP 3 — Use it in your voice/video app
+---------------------------------------
+1. In Minion Voice: pick your real microphone as the input; the virtual cable
+   (BlackHole / CABLE Input) is detected automatically as the output.
+2. Toggle the effect on and adjust the intensity slider.
+3. In Discord / Zoom / OBS, set the MICROPHONE to the virtual cable
+   (BlackHole / CABLE Output). Your friends now hear the minion voice.
+
+
+Troubleshooting
+---------------
+- "No virtual audio device found": you skipped Step 1, or (macOS) need to run
+  `sudo killall coreaudiod` / reboot after installing BlackHole.
+- Blank window (macOS): this bundle ships its own Tk, so this shouldn't happen —
+  if it does, re-download the latest build.

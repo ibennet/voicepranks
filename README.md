@@ -19,7 +19,24 @@ on Windows, or [BlackHole](https://existential.audio/blackhole/) on macOS.
 Install one of those first, then point your voice/video app's microphone
 input at it.
 
-## Requirements
+## Download & run (no Python)
+
+Not a developer? Grab a prebuilt bundle and double-click it — no Python, no
+`pip`. You only need to install one small free driver first.
+
+1. **Install the free virtual audio cable** (this is *not* bundled — it's a
+   system driver): [BlackHole](https://existential.audio/blackhole/) on macOS,
+   [VB-CABLE](https://vb-audio.com/Cable/) on Windows.
+2. **Unzip and open the app.** It's unsigned, so the OS warns you the first time:
+   - macOS: right-click `Minion Voice.app` → **Open** → **Open**.
+   - Windows: on the SmartScreen prompt, **More info → Run anyway**.
+3. In Discord / Zoom / OBS, set the **microphone** to the virtual cable
+   (BlackHole / CABLE Output).
+
+Full end-user steps ship inside each zip as `INSTALL.txt`. To *build* these
+bundles yourself, see [`DISTRIBUTING.md`](DISTRIBUTING.md).
+
+## Requirements (running from source)
 
 - Python 3.9+
 - `numpy`, `sounddevice` (see `requirements.txt`)

@@ -3,9 +3,13 @@
 Usage:
     python -m minion_voice.selftest OUTPUT.wav
     python -m minion_voice.selftest INPUT.wav OUTPUT.wav [--semitones 8] [--eq-db 8]
+    python -m minion_voice.selftest INPUT.wav OUTPUT.wav --gibberish
 
 If INPUT.wav is omitted, a 2-second synthetic test tone (200 Hz with a
 little vibrato) is generated so the tool is runnable with zero inputs.
+
+Pass --gibberish to route through Minionese mode instead of the plain
+pitch shift (--semitones/--eq-db are ignored in that mode).
 """
 from __future__ import annotations
 
@@ -111,6 +115,11 @@ def main(argv: Optional[list] = None) -> None:
     )
     parser.add_argument("--semitones", type=float, default=MinionEffect.MAX_SEMITONES, help="Pitch shift in semitones.")
     parser.add_argument("--eq-db", type=float, default=MinionEffect.MAX_EQ_GAIN_DB, help="Presence EQ boost in dB.")
+    parser.add_argument(
+        "--gibberish",
+        action="store_true",
+        help="Route through Minionese gibberish mode instead of the plain pitch shift.",
+    )
     args = parser.parse_args(argv)
 
     if len(args.paths) == 1:
@@ -133,6 +142,7 @@ def main(argv: Optional[list] = None) -> None:
     effect = MinionEffect(sample_rate)
     effect.pitch.set_semitones(args.semitones)
     effect.eq.set_gain_db(args.eq_db)
+    effect.set_gibberish(args.gibberish)
 
     output_signal = _process_in_blocks(effect, input_signal)
 
@@ -144,7 +154,10 @@ def main(argv: Optional[list] = None) -> None:
     out_peak_freq = _peak_freq(output_signal, sample_rate)
 
     print(f"Wrote output '{output_path}'")
-    print(f"Semitones: {args.semitones}, EQ gain: {args.eq_db} dB")
+    if args.gibberish:
+        print("Mode: Minionese (gibberish) -- --semitones/--eq-db do not apply")
+    else:
+        print(f"Mode: plain pitch shift -- semitones: {args.semitones}, EQ gain: {args.eq_db} dB")
     print(f"Input  RMS: {in_rms:.4f}   peak freq: {in_peak_freq:.1f} Hz")
     print(f"Output RMS: {out_rms:.4f}   peak freq: {out_peak_freq:.1f} Hz")
 

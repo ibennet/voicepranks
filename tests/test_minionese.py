@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from minion_voice.dsp.minionese import Minionese
+from minion_voice.dsp.minionese import MAX_SLEW, Minionese
 
 SAMPLE_RATE = 48000
 BLOCK = 256
@@ -14,6 +14,21 @@ def _gen_sawtooth(freq: float, duration_s: float, sample_rate: int = SAMPLE_RATE
     phase = (t * freq) % 1.0
     saw = 2.0 * phase - 1.0
     return (0.5 * saw).astype(np.float32)
+
+
+def _gen_sawtooth_with_transient(freq: float, duration_s: float, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """Quiet sawtooth that jumps to full amplitude halfway through.
+
+    Mimics the scenario in commit 9042a06: several quiet frames (gsm
+    auto-gain-match saturates at its 3x ceiling) followed by a loud
+    transient (gsm still pinned -> overshoot).
+    """
+    n = int(sample_rate * duration_s)
+    t = np.arange(n, dtype=np.float64) / sample_rate
+    phase = (t * freq) % 1.0
+    saw = 2.0 * phase - 1.0
+    amp = np.where(t < duration_s / 2.0, 0.05, 0.9)
+    return (amp * saw).astype(np.float32)
 
 
 def _process_in_blocks(effect: Minionese, signal: np.ndarray, block: int = BLOCK) -> np.ndarray:
@@ -57,6 +72,19 @@ def test_minionese_reset_reproducible_with_same_seed():
     out3 = _process_in_blocks(effect1, signal)
     assert out3.shape[0] == out1.shape[0]
     assert np.allclose(out3, out1)
+
+
+def test_minionese_slew_limiter_caps_output_jumps():
+    """Regression test for commit 9042a06 (AGC-overshoot pop fix)."""
+    effect = Minionese(SAMPLE_RATE, seed=0)
+    effect.set_intensity(1.0)
+
+    signal = _gen_sawtooth_with_transient(150.0, 2.0)
+    out = _process_in_blocks(effect, signal)
+
+    assert out.shape[0] > 0
+    jumps = np.abs(np.diff(out.astype(np.float64)))
+    assert jumps.max() <= MAX_SLEW + 1e-6
 
 
 def test_minionese_silence_in_stays_silent():
