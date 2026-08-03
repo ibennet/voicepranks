@@ -1,0 +1,46 @@
+name: Release on merge to main
+
+# Every merge/push to main auto-bumps the patch version and ships a release:
+# compute the next vX.Y.Z from existing tags, then hand off to build.yml
+# (reused via workflow_call) to build the bundles and publish the Release at
+# that tag. The tag is created by the release step at the merge commit, so no
+# tag is pushed here -- which also means no PAT is needed (a GITHUB_TOKEN tag
+# push wouldn't retrigger build.yml's tag trigger anyway).
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Compute next version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full tag history to find the latest version
+      - name: Compute next patch tag
+        id: next
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          latest=${latest:-v0.0.0}
+          ver=${latest#v}
+          IFS=. read -r major minor patch <<< "$ver"
+          next="v${major}.${minor}.$((patch + 1))"
+          echo "Latest tag: ${latest} -> next: ${next}"
+          echo "tag=${next}" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    name: Build + publish
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      tag_name: ${{ needs.version.outputs.tag }}
+    permissions:
+      contents: write
+    secrets: inherit
