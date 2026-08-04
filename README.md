@@ -118,19 +118,36 @@ Endpoints (JSON in/out unless noted):
 | POST | `/api/record/stop` | | Stop recording |
 | POST | `/api/render` | | Re-render the dry take with the *current* params (A/B flow) |
 | POST | `/api/play` | `{"which": "live"\|"raw"\|"rendered"}` | Play a take (default `live`) through the output device |
-| POST | `/api/save` | `{"path": ..., "which": "live"\|"raw"\|"rendered"}` | Save a take to a WAV file |
+| POST | `/api/save` | `{"path": ..., "which": "live"\|"raw"\|"rendered"}` | Save a take as a WAV **inside `~/.voicepranks/recordings/`** (relative paths only) |
 | GET | `/api/recording.wav?which=live\|raw\|rendered` | | Download a take as WAV bytes |
 | GET | `/` | | Minimal read-only status/params page |
+
+### Authentication
+
+The API can switch on your microphone and read recordings back, and *any*
+web page you visit can send requests to `127.0.0.1`. So every `/api/*` call
+must present a control token:
+
+- It's generated per process and printed at startup (and by the Tkinter app
+  on stderr). A copy lands in `~/.voicepranks/control-token` (mode 0600).
+- Pass it as the `X-VoicePranks-Token` header or a `?token=...` query param.
+- Set `VOICEPRANKS_CONTROL_TOKEN` to pin a fixed value for scripts.
+
+Requests are also rejected unless the `Host` header names loopback (blocking
+DNS rebinding) and any `Origin` header is loopback (blocking drive-by
+requests from a site you have open). Opening `http://127.0.0.1:8765/` in a
+browser still just works -- the page is served with its token baked in.
 
 Example tuning loop:
 
 ```
-curl -s localhost:8765/api/state | jq .values
-curl -s -XPOST localhost:8765/api/params -d '{"minionese.semitones": 6.5}'
-curl -s -XPOST localhost:8765/api/record/start
+TOKEN=$(cat ~/.voicepranks/control-token)
+curl -s -H "X-VoicePranks-Token: $TOKEN" localhost:8765/api/state | jq .values
+curl -s -H "X-VoicePranks-Token: $TOKEN" -XPOST localhost:8765/api/params -d '{"minionese.semitones": 6.5}'
+curl -s -H "X-VoicePranks-Token: $TOKEN" -XPOST localhost:8765/api/record/start
 # ...speak...
-curl -s -XPOST localhost:8765/api/record/stop
-curl -s -XPOST localhost:8765/api/play          # plays the live processed take
+curl -s -H "X-VoicePranks-Token: $TOKEN" -XPOST localhost:8765/api/record/stop
+curl -s -H "X-VoicePranks-Token: $TOKEN" -XPOST localhost:8765/api/play   # plays the live processed take
 ```
 
 ## Record and playback

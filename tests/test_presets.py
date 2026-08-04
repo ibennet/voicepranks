@@ -11,7 +11,7 @@ import pytest
 
 from voicepranks import presets
 from voicepranks.audio.engine import VoiceEngine
-from voicepranks.control_server import ControlServer
+from voicepranks.control_server import TOKEN_HEADER, ControlServer
 from voicepranks.params import PARAM_SPECS_BY_NAME
 
 SAMPLE_RATE = 48000
@@ -187,10 +187,13 @@ def test_apply_preset_does_not_change_enabled_or_devices():
 # -- control server round-trip ------------------------------------------------
 
 
+TEST_TOKEN = "test-token-presets"
+
+
 @pytest.fixture()
-def server():
+def server(tmp_path):
     engine = VoiceEngine(sample_rate=SAMPLE_RATE, blocksize=BLOCK)
-    srv = ControlServer(engine)
+    srv = ControlServer(engine, token=TEST_TOKEN, save_root=tmp_path / "recordings")
     base_url = srv.start(host="127.0.0.1", port=0)
     yield srv, engine, base_url
     srv.stop()
@@ -198,7 +201,7 @@ def server():
 
 def _get(base_url: str, path: str):
     conn = http.client.HTTPConnection(base_url.split("://", 1)[1])
-    conn.request("GET", path)
+    conn.request("GET", path, headers={TOKEN_HEADER: TEST_TOKEN})
     resp = conn.getresponse()
     return resp.status, json.loads(resp.read())
 
@@ -206,7 +209,10 @@ def _get(base_url: str, path: str):
 def _post(base_url: str, path: str, payload: dict):
     conn = http.client.HTTPConnection(base_url.split("://", 1)[1])
     body = json.dumps(payload)
-    conn.request("POST", path, body, {"Content-Type": "application/json"})
+    conn.request(
+        "POST", path, body,
+        {"Content-Type": "application/json", TOKEN_HEADER: TEST_TOKEN},
+    )
     resp = conn.getresponse()
     return resp.status, json.loads(resp.read())
 

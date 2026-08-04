@@ -107,6 +107,11 @@ class VoicePranksApp:
             self.control_server = ControlServer(self.engine)
             url = self.control_server.start()
             _log(f"[voicepranks] control API listening at {url}\n")
+            # The API can open the mic, so it requires a token. Opening the URL
+            # in a browser just works (the page is served with the token baked
+            # in); scripted callers need it spelled out.
+            _log(f"[voicepranks] control token: {self.control_server.token}\n")
+            _log(f"[voicepranks] token file: {self.control_server.token_path}\n")
 
         # Device lists + persisted device selection (see settings.py). Loaded
         # before the widgets so the Settings dialog and engine start with the

@@ -27,9 +27,12 @@
 </table>
 
 <script>
+// Injected by the control server when it serves this page.
+const CONTROL_TOKEN = '__CONTROL_TOKEN__';
+
 async function refresh() {
   try {
-    const res = await fetch('/api/state');
+    const res = await fetch('/api/state', { headers: { 'X-VoicePranks-Token': CONTROL_TOKEN } });
     const data = await res.json();
     document.getElementById('err').textContent = '';
 
