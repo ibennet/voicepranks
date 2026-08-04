@@ -35,7 +35,10 @@ Endpoints (all JSON in/out unless noted):
 from __future__ import annotations
 
 import dataclasses
+import hmac
 import json
+import os
+import secrets
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,9 +48,56 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import params as params_mod
 from . import presets as presets_mod
+from . import settings as settings_mod
 from .audio.devices import list_input_devices, list_output_devices
 
 _WEBUI_INDEX = Path(__file__).parent / "webui" / "index.html"
+
+# The API can start the mic and read back recordings, so it is authenticated
+# even though it only listens on loopback: any web page you visit can reach
+# 127.0.0.1, and a browser will happily attach no credentials at all.
+TOKEN_HEADER = "X-VoicePranks-Token"
+_TOKEN_PLACEHOLDER = "__CONTROL_TOKEN__"
+
+# Hostnames that mean "this machine". A DNS-rebinding attacker resolves their
+# own domain to 127.0.0.1, so the Host header (not the socket address) is what
+# distinguishes a real local client from a rebound one.
+_LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
+
+# `POST /api/save` writes a WAV wherever it is told, so confine it to one
+# directory rather than letting an API caller choose an arbitrary path.
+SAVE_ROOT = settings_mod.SETTINGS_DIR / "recordings"
+
+
+def _is_loopback_name(hostname: Optional[str]) -> bool:
+    if not hostname:
+        return False
+    return hostname.strip("[]").lower() in _LOOPBACK_NAMES
+
+
+def resolve_save_path(raw: str, root: Optional[Path] = None) -> Path:
+    """Map a caller-supplied `/api/save` path onto a file inside `root`.
+
+    Rejects absolute paths, drive letters and `..` traversal, then re-checks
+    the *resolved* path is still under `root` so a symlink inside the
+    directory can't be used to escape it. Raises ValueError if it can't.
+    """
+    root = (root or SAVE_ROOT).expanduser()
+    candidate = Path(raw)
+    if candidate.is_absolute() or candidate.drive or candidate.anchor:
+        raise ValueError("path must be relative to the recordings directory")
+    if any(part == ".." for part in candidate.parts):
+        raise ValueError("path must not contain '..'")
+    if candidate.suffix.lower() != ".wav":
+        raise ValueError("path must end in .wav")
+
+    root.mkdir(parents=True, exist_ok=True)
+    resolved_root = root.resolve()
+    full = (resolved_root / candidate).resolve()
+    if full != resolved_root and resolved_root not in full.parents:
+        raise ValueError("path escapes the recordings directory")
+    full.parent.mkdir(parents=True, exist_ok=True)
+    return full
 
 
 # PARAM_SPECS are frozen and never change, so serialize them once at import
@@ -69,7 +119,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # Deliberately no Access-Control-Allow-Origin: a wildcard here would
+        # let any site you visit read /api/state and the recorded audio.
         self.end_headers()
         self.wfile.write(body)
 
@@ -96,11 +147,43 @@ class _Handler(BaseHTTPRequestHandler):
     def engine(self):
         return self.server.engine
 
+    # -- authentication --------------------------------------------------
+
+    def _authorized(self, query: dict) -> bool:
+        """True if this request may touch /api/*.
+
+        Three independent gates, all cheap:
+        1. `Host` must name loopback -- defeats DNS rebinding, where an
+           attacker's domain resolves to 127.0.0.1 but still sends its own
+           name in Host.
+        2. `Origin`, when present, must be loopback -- a browser sets it on
+           cross-site requests and scripts cannot forge it, so this blocks
+           drive-by POSTs from a page you happen to have open.
+        3. A token must match. The status page gets it injected server-side;
+           `curl` users read it from the startup banner or the token file.
+        """
+        if not _is_loopback_name(urlsplit(f"//{self.headers.get('Host', '')}").hostname):
+            return False
+
+        origin = self.headers.get("Origin")
+        if origin is not None and not _is_loopback_name(urlsplit(origin).hostname):
+            return False
+
+        supplied = self.headers.get(TOKEN_HEADER) or (query.get("token") or [""])[0]
+        return hmac.compare_digest(supplied, self.server.token)
+
     # -- routing -------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
         query = parse_qs(urlsplit(self.path).query)
+        # "/" is the token-bearing status page itself, so it is the one route
+        # that can't require a token. It exposes no engine state, and the
+        # token it carries is unreadable cross-origin now that the wildcard
+        # CORS header is gone.
+        if path.startswith("/api/") and not self._authorized(query):
+            self._send_error_json(HTTPStatus.FORBIDDEN, "missing or invalid control token")
+            return
         try:
             if path == "/" or path == "/index.html":
                 self._handle_index()
@@ -120,6 +203,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if not self._authorized(parse_qs(urlsplit(self.path).query)):
+            self._send_error_json(HTTPStatus.FORBIDDEN, "missing or invalid control token")
+            return
         try:
             if path == "/api/params":
                 self._handle_params_post()
@@ -175,8 +261,13 @@ class _Handler(BaseHTTPRequestHandler):
                 if not path_arg:
                     self._send_error_json(HTTPStatus.BAD_REQUEST, "missing 'path'")
                     return
-                self.engine.save(path_arg, body.get("which", "live"))
-                self._send_json({"ok": True, "path": path_arg})
+                try:
+                    target = resolve_save_path(str(path_arg), self.server.save_root)
+                except ValueError as exc:
+                    self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self.engine.save(str(target), body.get("which", "live"))
+                self._send_json({"ok": True, "path": str(target)})
             else:
                 self._send_error_json(HTTPStatus.NOT_FOUND, f"no such route: {path}")
         except Exception as exc:
@@ -186,7 +277,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_index(self) -> None:
         if _WEBUI_INDEX.exists():
-            self._send_bytes(_WEBUI_INDEX.read_bytes(), "text/html; charset=utf-8")
+            # Hand the page its own token so opening the URL still just works.
+            # Safe to embed: without wildcard CORS a cross-origin script can
+            # issue this request but cannot read the response back.
+            page = _WEBUI_INDEX.read_text(encoding="utf-8").replace(
+                _TOKEN_PLACEHOLDER, self.server.token
+            )
+            self._send_bytes(page.encode("utf-8"), "text/html; charset=utf-8")
         else:
             self._send_bytes(b"<html><body>voicepranks control server</body></html>", "text/html")
 
@@ -264,18 +361,46 @@ class _Handler(BaseHTTPRequestHandler):
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, handler_cls, engine) -> None:
+    def __init__(self, addr, handler_cls, engine, token, save_root) -> None:
         super().__init__(addr, handler_cls)
         self.engine = engine
+        self.token = token
+        self.save_root = save_root
 
 
 class ControlServer:
-    """Runs the HTTP control API for `engine` in a background daemon thread."""
+    """Runs the HTTP control API for `engine` in a background daemon thread.
 
-    def __init__(self, engine) -> None:
+    Every `/api/*` call must present `token` (via the `X-VoicePranks-Token`
+    header or a `?token=` query param). One is generated per process unless
+    `VOICEPRANKS_CONTROL_TOKEN` overrides it, and `start()` drops a copy in
+    `~/.voicepranks/control-token` so CLI callers can pick it up.
+    """
+
+    def __init__(self, engine, token: Optional[str] = None, save_root: Optional[Path] = None) -> None:
         self.engine = engine
+        self.token = token or os.environ.get("VOICEPRANKS_CONTROL_TOKEN") or secrets.token_urlsafe(32)
+        self.save_root = save_root or SAVE_ROOT
         self._httpd: Optional[_Server] = None
         self._thread: Optional[threading.Thread] = None
+
+    @property
+    def token_path(self) -> Path:
+        return settings_mod.SETTINGS_DIR / "control-token"
+
+    def _write_token_file(self) -> None:
+        """Persist the token 0600 so `curl` users can read it back.
+
+        Created with the mode already applied rather than write-then-chmod,
+        which would leave the token briefly readable at the umask default.
+        """
+        try:
+            settings_mod.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self.token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(self.token)
+        except OSError:
+            pass  # non-fatal: the banner still prints the token
 
     @property
     def base_url(self) -> Optional[str]:
@@ -291,7 +416,8 @@ class ControlServer:
         Pass `port=0` to bind an ephemeral free port (useful for tests)."""
         if self._httpd is not None:
             return self.base_url
-        self._httpd = _Server((host, port), _Handler, self.engine)
+        self._write_token_file()
+        self._httpd = _Server((host, port), _Handler, self.engine, self.token, self.save_root)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True, name="minion-control-server")
         self._thread.start()
         return self.base_url

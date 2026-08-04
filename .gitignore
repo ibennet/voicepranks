@@ -11,3 +11,7 @@ dist/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+
+# Third-party driver pack — proprietary, never redistribute via this repo.
+VBCABLE_Driver_Pack45/
+VBCABLE_Driver_Pack*.zip

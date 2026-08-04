@@ -15,6 +15,7 @@ import os
 import sys
 import time
 
+from . import control_server as control_server_mod
 from .audio.engine import VoiceEngine
 from .control_server import ControlServer
 
@@ -45,6 +46,11 @@ def main(argv=None) -> None:
     base_url = server.start(host=host, port=port)
 
     print(f"voicepranks control server listening at {base_url}")
+    print(f"Control token: {server.token}")
+    print(f"  (also at {server.token_path}; pass it as the "
+          f"{control_server_mod.TOKEN_HEADER} header or ?token=...)")
+    print(f"  e.g. curl -H '{control_server_mod.TOKEN_HEADER}: {server.token}' {base_url}/api/state")
+    print(f"Recordings saved via POST /api/save land under {server.save_root}")
     print("Endpoints:")
     print(f"  GET  {base_url}/api/state")
     print(f"  POST {base_url}/api/params            {{'name': value, ...}}")
