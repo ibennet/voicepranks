@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 
 from ..audio import wavio
+from ..settings import SETTINGS_DIR
 from .biquad import PeakingEQ
 
 # Vocal-tract formant resonances (Hz, Q, boost dB) that color the glottal
@@ -48,10 +49,11 @@ _FORMANTS = ((650.0, 4.0, 10.0), (1100.0, 5.0, 9.0), (2600.0, 6.0, 7.0))
 # Bundled stock laugh clip. If present it's used instead of the synth fallback.
 _SAMPLE_PATH = Path(__file__).resolve().parent.parent / "assets" / "goofy_laugh.wav"
 
-# User-recorded laugh clip. Lives under the same user config dir as settings
-# (`~/.voicepranks/`) so it survives restarts and stays writable even when the
-# app is a read-only bundled build. When present it overrides the stock clip.
-_CUSTOM_PATH = Path.home() / ".voicepranks" / "custom_laugh.wav"
+# User-recorded laugh clip. Lives in the shared user config dir (`settings.
+# SETTINGS_DIR`, i.e. `~/.voicepranks/`) so it survives restarts and stays
+# writable even when the app is a read-only bundled build. When present it
+# overrides the stock clip.
+_CUSTOM_PATH = SETTINGS_DIR / "custom_laugh.wav"
 
 
 def _load_sample(path: Path, target_sr: int):
@@ -154,8 +156,11 @@ class GoofyLaugh:
     def reset_to_stock(self) -> None:
         """Drop any user recording and revert to the bundled stock clip.
         Deletes the saved custom file so the revert also survives a restart."""
+        # Best-effort delete: revert the in-memory clip even if the file can't
+        # be removed (FileNotFoundError is an OSError, so this covers "already
+        # gone" too).
         try:
-            self._custom_path.unlink(missing_ok=True)
+            self._custom_path.unlink()
         except OSError:
             pass
         self._sample = _load_sample(_SAMPLE_PATH, self.sample_rate)

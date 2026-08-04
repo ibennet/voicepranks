@@ -208,6 +208,19 @@ class MinionEffect:
     def set_laugh_gain(self, gain: float) -> None:
         self.laugh.set_gain(float(gain))
 
+    def save_custom_laugh(self, mono) -> None:
+        """Install a recording as the goofy-laugh clip (see GoofyLaugh.save_custom)."""
+        self.laugh.save_custom(mono)
+
+    def reset_custom_laugh(self) -> None:
+        """Revert the goofy laugh to the bundled stock clip."""
+        self.laugh.reset_to_stock()
+
+    @property
+    def custom_laugh(self) -> bool:
+        """True when a user-recorded laugh clip is active (vs the stock clip)."""
+        return self.laugh.using_custom
+
     def reset(self) -> None:
         self.pitch.reset()
         self.eq.reset()

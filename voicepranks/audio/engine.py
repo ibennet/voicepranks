@@ -532,7 +532,7 @@ class VoiceEngine:
             "last_error": self.last_error,
             "recording": self._recording,
             "laugh_recording": self._laugh_recording,
-            "custom_laugh": self.effect.laugh.using_custom,
+            "custom_laugh": self.effect.custom_laugh,
             "take_seconds": self._current_take_seconds(),
             "has_live_take": self._live_take is not None and self._live_take.size > 0,
             "has_raw_take": self._raw_take is not None and self._raw_take.size > 0,
@@ -596,12 +596,12 @@ class VoiceEngine:
                 else np.zeros(0, dtype=np.float32)
             )
             self._laugh_chunks = []
-        self.effect.laugh.save_custom(take)
+        self.effect.save_custom_laugh(take)
         return take
 
     def reset_laugh_to_stock(self) -> None:
         """Discard any custom laugh recording and revert to the bundled clip."""
-        self.effect.laugh.reset_to_stock()
+        self.effect.reset_custom_laugh()
 
     def _current_take_seconds(self) -> float:
         with self._record_lock:
@@ -704,14 +704,18 @@ class VoiceEngine:
             # your listening device, which that trim must not touch.
             if self._recording or self._laugh_recording:
                 with self._record_lock:
+                    # One dry-mic copy shared by both recorders (each only reads
+                    # it), so an overlapping take + laugh capture doesn't copy
+                    # the same block twice on the audio hot path.
+                    dry = mono.copy()
                     if self._recording:
-                        self._raw_chunks.append(mono.copy())
+                        self._raw_chunks.append(dry)
                         if processed.size:
                             self._live_chunks.append(np.asarray(processed, dtype=np.float32).copy())
                     # Custom-laugh capture uses the DRY mic (the laugh clip is a
                     # plain recording of you, not the voice effect).
                     if self._laugh_recording:
-                        self._laugh_chunks.append(mono.copy())
+                        self._laugh_chunks.append(dry)
 
             # Output volume trims ONLY the output mic (the virtual cable other
             # apps hear), leaving the live monitor and recorded takes at their

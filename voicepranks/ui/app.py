@@ -670,17 +670,25 @@ class VoicePranksApp:
 
     # -- recorder ----------------------------------------------------------
 
+    def _ensure_engine_running(self, context: str) -> bool:
+        """Start the audio engine if it isn't already. Returns True on success;
+        on failure records an error mentioning `context` and returns False."""
+        if self.engine.running:
+            return True
+        try:
+            self.engine.start()
+            return True
+        except Exception as exc:
+            self.error_message = f"Could not start audio for {context}: {exc}"
+            return False
+
     def _on_record(self) -> None:
         # Run the effect live during capture so the user hears the real-time
         # result (via the live monitor) while recording, not just the offline
         # re-render. Recording still captures the DRY signal, so re-render
         # with tweaked params keeps working.
-        if not self.engine.running:
-            try:
-                self.engine.start()
-            except Exception as exc:
-                self.error_message = f"Could not start audio for recording: {exc}"
-                return
+        if not self._ensure_engine_running("recording"):
+            return
         if not self.engine.enabled:
             self.engine.set_enabled(True)
             self.toggle_button.config(text="Turn Off")
@@ -693,12 +701,8 @@ class VoicePranksApp:
         # Capturing the laugh needs the input stream live, but not the effect
         # enabled -- the clip is a dry recording of you, so we don't force the
         # voice changer on the way the take recorder does.
-        if not self.engine.running:
-            try:
-                self.engine.start()
-            except Exception as exc:
-                self.error_message = f"Could not start audio for laugh recording: {exc}"
-                return
+        if not self._ensure_engine_running("laugh recording"):
+            return
         self.engine.record_laugh_start()
         self.error_message = None
 
