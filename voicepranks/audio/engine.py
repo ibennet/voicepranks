@@ -166,6 +166,14 @@ class VoiceEngine:
         self._live_take: Optional[np.ndarray] = None
         self._rendered_take: Optional[np.ndarray] = None
 
+        # -- custom-laugh recorder ----------------------------------------
+        # A separate, lightweight capture path (guarded by the same lock) used
+        # only to record a replacement "goofy laugh" clip from the dry mic. Kept
+        # apart from the take recorder above so recording a laugh never disturbs
+        # an in-progress take, and vice versa.
+        self._laugh_recording = False
+        self._laugh_chunks: List[np.ndarray] = []
+
     # -- param registry (shared by Tkinter UI + HTTP control server) -----
 
     def set_param(self, name: str, value) -> None:
@@ -523,6 +531,8 @@ class VoiceEngine:
             "latency_ms": round(self.effect.latency_ms(), 1),
             "last_error": self.last_error,
             "recording": self._recording,
+            "laugh_recording": self._laugh_recording,
+            "custom_laugh": self.effect.custom_laugh,
             "take_seconds": self._current_take_seconds(),
             "has_live_take": self._live_take is not None and self._live_take.size > 0,
             "has_raw_take": self._raw_take is not None and self._raw_take.size > 0,
@@ -562,6 +572,36 @@ class VoiceEngine:
             self._raw_chunks = []
             self._live_chunks = []
         return self._live_take
+
+    # -- custom-laugh recorder -------------------------------------------
+
+    def record_laugh_start(self) -> None:
+        """Begin capturing the dry mic into a replacement goofy-laugh clip.
+        Independent of the take recorder -- laugh Record/Stop and take
+        Record/Stop can even overlap without clobbering each other."""
+        with self._record_lock:
+            self._laugh_chunks = []
+            self._laugh_recording = True
+
+    def record_laugh_stop(self) -> np.ndarray:
+        """Stop laugh capture and install the recording as the active goofy
+        laugh (persisted to `~/.voicepranks/custom_laugh.wav`). Returns the
+        captured mono take. Raises if the recording was empty/silent, leaving
+        the current clip untouched."""
+        with self._record_lock:
+            self._laugh_recording = False
+            take = (
+                np.concatenate(self._laugh_chunks)
+                if self._laugh_chunks
+                else np.zeros(0, dtype=np.float32)
+            )
+            self._laugh_chunks = []
+        self.effect.save_custom_laugh(take)
+        return take
+
+    def reset_laugh_to_stock(self) -> None:
+        """Discard any custom laugh recording and revert to the bundled clip."""
+        self.effect.reset_custom_laugh()
 
     def _current_take_seconds(self) -> float:
         with self._record_lock:
@@ -662,19 +702,35 @@ class VoiceEngine:
             # concatenation of exactly what went out. Captured pre-gain: Output
             # volume trims only the output mic (below), and Play routes takes to
             # your listening device, which that trim must not touch.
-            if self._recording:
+            if self._recording or self._laugh_recording:
                 with self._record_lock:
+                    # One dry-mic copy shared by both recorders (each only reads
+                    # it), so an overlapping take + laugh capture doesn't copy
+                    # the same block twice on the audio hot path.
+                    dry = mono.copy()
                     if self._recording:
-                        self._raw_chunks.append(mono.copy())
+                        self._raw_chunks.append(dry)
                         if processed.size:
                             self._live_chunks.append(np.asarray(processed, dtype=np.float32).copy())
+                    # Custom-laugh capture uses the DRY mic (the laugh clip is a
+                    # plain recording of you, not the voice effect).
+                    if self._laugh_recording:
+                        self._laugh_chunks.append(dry)
 
             # Output volume trims ONLY the output mic (the virtual cable other
             # apps hear), leaving the live monitor and recorded takes at their
             # natural level -- so a quiet preset can be sent hot to other apps
             # without changing what you monitor. Applied just before the ring.
             out_mic = processed
-            if self.output_gain != 1.0 and processed.size:
+            if self._laugh_recording and not self.enabled:
+                # The engine was started only to capture a custom laugh clip
+                # (effect off), so don't leak the raw mic to the virtual cable
+                # while recording -- other apps would otherwise hear you laughing
+                # into the sample. The clip is still captured from the dry mic
+                # above; when the effect is ON we leave the cable alone (you're
+                # performing, and the laugh capture is incidental).
+                out_mic = np.zeros_like(processed)
+            elif self.output_gain != 1.0 and processed.size:
                 out_mic = processed * np.float32(self.output_gain)
 
             # Meter the output-mic signal (post-gain) so the "out" level shows
