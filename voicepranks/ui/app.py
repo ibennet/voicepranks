@@ -709,6 +709,7 @@ class VoicePranksApp:
     def _on_record_laugh_stop(self) -> None:
         try:
             self.engine.record_laugh_stop()
+            self.error_message = None  # clear any stale "empty/silent" error
         except ValueError:
             self.error_message = "Laugh recording was empty or silent -- nothing saved."
         except Exception as exc:

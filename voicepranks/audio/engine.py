@@ -722,7 +722,15 @@ class VoiceEngine:
             # natural level -- so a quiet preset can be sent hot to other apps
             # without changing what you monitor. Applied just before the ring.
             out_mic = processed
-            if self.output_gain != 1.0 and processed.size:
+            if self._laugh_recording and not self.enabled:
+                # The engine was started only to capture a custom laugh clip
+                # (effect off), so don't leak the raw mic to the virtual cable
+                # while recording -- other apps would otherwise hear you laughing
+                # into the sample. The clip is still captured from the dry mic
+                # above; when the effect is ON we leave the cable alone (you're
+                # performing, and the laugh capture is incidental).
+                out_mic = np.zeros_like(processed)
+            elif self.output_gain != 1.0 and processed.size:
                 out_mic = processed * np.float32(self.output_gain)
 
             # Meter the output-mic signal (post-gain) so the "out" level shows

@@ -145,6 +145,21 @@ def test_laugh_recording_does_not_disturb_take_recorder(tmp_path):
     assert engine.get_status()["custom_laugh"] is True
 
 
+def test_laugh_recording_mutes_output_cable_when_effect_off(tmp_path):
+    # Capturing a laugh with the effect OFF must not leak the raw mic to the
+    # virtual output cable -- the output-mic meter (post out_mic) should read
+    # silence while the dry-input meter stays loud.
+    engine = _engine(tmp_path)
+    assert engine.enabled is False
+    engine.record_laugh_start()
+    _feed_dry_take(engine, _loud_signal())
+
+    assert engine._dry_peak > 0.1, "dry mic should still register the input"
+    assert engine._proc_peak == 0.0, "cable output should be muted during laugh capture"
+
+    engine.record_laugh_stop()
+
+
 def test_engine_record_laugh_stop_silent_raises(tmp_path):
     engine = _engine(tmp_path)
     engine.record_laugh_start()
