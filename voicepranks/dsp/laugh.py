@@ -4,11 +4,14 @@ A *generator* stage (unlike the transform stages): it emits a short laugh and
 randomly mixes it on top of the voice, ducking the voice a touch underneath it.
 Used by the "goofy" preset to punctuate speech with an occasional laugh.
 
-The laugh comes from a real audio clip when one is present at
-`voicepranks/assets/goofy_laugh.wav` (loaded once via the stdlib `wave` module
--- no MP3/ffmpeg dependency; resampled to the engine rate if needed). If that
-asset is absent, it falls back to a fully synthesized giggle so the feature
-still works with no bundled audio.
+The laugh comes from a real audio clip. A *user-recorded* clip at
+`~/.voicepranks/custom_laugh.wav` takes priority (recorded in-app via the
+"Record laugh" button); absent that, the bundled stock clip at
+`voicepranks/assets/goofy_laugh.wav` is used. Both are loaded via the stdlib
+`wave` module -- no MP3/ffmpeg dependency; resampled to the engine rate if
+needed. If neither is present it falls back to a fully synthesized giggle so
+the feature still works with no bundled audio. `save_custom()` installs a fresh
+recording and `reset_to_stock()` drops back to the bundled clip.
 
 The synthesized fallback models a real laugh rather than a pure tone: a
 band-limited sawtooth *glottal source* (buzzy voiced excitation with a natural
@@ -42,8 +45,13 @@ from .biquad import PeakingEQ
 # source into a laugh vowel (roughly an "uh/ah"). Used by the synth fallback.
 _FORMANTS = ((650.0, 4.0, 10.0), (1100.0, 5.0, 9.0), (2600.0, 6.0, 7.0))
 
-# Optional real laugh clip. If present it's used instead of the synth fallback.
+# Bundled stock laugh clip. If present it's used instead of the synth fallback.
 _SAMPLE_PATH = Path(__file__).resolve().parent.parent / "assets" / "goofy_laugh.wav"
+
+# User-recorded laugh clip. Lives under the same user config dir as settings
+# (`~/.voicepranks/`) so it survives restarts and stays writable even when the
+# app is a read-only bundled build. When present it overrides the stock clip.
+_CUSTOM_PATH = Path.home() / ".voicepranks" / "custom_laugh.wav"
 
 
 def _load_sample(path: Path, target_sr: int):
@@ -93,10 +101,26 @@ class GoofyLaugh:
         self.gain = 0.0          # configured laugh mix level (at full intensity)
         self._scale = 1.0        # intensity scale, 0..1 (0 = laughs disabled)
 
-        # Real laugh clip if bundled, else None (-> synthesized fallback).
-        self._sample = _load_sample(_SAMPLE_PATH, self.sample_rate)
+        # Where a user-recorded clip is stored (overridable so tests can point
+        # it at a temp file instead of the real user config dir).
+        self._custom_path = _CUSTOM_PATH
+        # Active clip: a user recording if one exists, else the bundled stock
+        # clip, else None (-> synthesized fallback). `using_custom` says which.
+        self.using_custom = False
+        self._sample = self._load_active_sample()
 
         self._init_state()
+
+    def _load_active_sample(self):
+        """Pick the active laugh clip: a user recording if present, else the
+        bundled stock clip, else None. Sets `using_custom` accordingly."""
+        if self._custom_path.exists():
+            custom = _load_sample(self._custom_path, self.sample_rate)
+            if custom is not None and custom.size > 0:
+                self.using_custom = True
+                return custom
+        self.using_custom = False
+        return _load_sample(_SAMPLE_PATH, self.sample_rate)
 
     # -- configuration ---------------------------------------------------
 
@@ -111,6 +135,31 @@ class GoofyLaugh:
     def set_intensity_scale(self, s: float) -> None:
         """Master-intensity gate: 0 disables laughs, > 0 enables them."""
         self._scale = min(max(float(s), 0.0), 1.0)
+
+    # -- custom clip -----------------------------------------------------
+
+    def save_custom(self, mono: np.ndarray) -> None:
+        """Install a user recording as the active laugh, replacing the stock
+        clip, and persist it to `~/.voicepranks/custom_laugh.wav` so it sticks
+        across restarts. `mono` is float32 [-1, 1] at the engine sample rate.
+        A silent/empty recording is ignored (the clip is left unchanged)."""
+        data = np.asarray(mono, dtype=np.float32)
+        if data.size == 0 or float(np.max(np.abs(data))) < 1e-4:
+            raise ValueError("recording is empty or silent")
+        self._custom_path.parent.mkdir(parents=True, exist_ok=True)
+        wavio.write_wav(str(self._custom_path), self.sample_rate, data)
+        self._sample = data.copy()
+        self.using_custom = True
+
+    def reset_to_stock(self) -> None:
+        """Drop any user recording and revert to the bundled stock clip.
+        Deletes the saved custom file so the revert also survives a restart."""
+        try:
+            self._custom_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        self._sample = _load_sample(_SAMPLE_PATH, self.sample_rate)
+        self.using_custom = False
 
     def reset(self) -> None:
         self._init_state()

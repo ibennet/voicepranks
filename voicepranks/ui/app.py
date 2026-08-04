@@ -149,14 +149,15 @@ class VoicePranksApp:
         self._build_recorder_row(frame, row=1)
         self._build_ramp_row(frame, row=2)
         self._build_output_volume_row(frame, row=3)
+        self._build_custom_laugh_row(frame, row=4)
 
         ttk.Label(frame, text="Parameters (click a section to expand)").grid(
-            row=4, column=0, sticky="w", pady=(6, 0)
+            row=5, column=0, sticky="w", pady=(6, 0)
         )
 
         # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=5, column=0, sticky="nsew", pady=(2, 8))
+        scroll_container.grid(row=6, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -176,7 +177,7 @@ class VoicePranksApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=6, column=0, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=7, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -200,6 +201,26 @@ class VoicePranksApp:
             variable=self.monitor_var,
             command=self._on_monitor_toggle,
         ).pack(side="left", padx=(12, 0))
+
+    def _build_custom_laugh_row(self, frame: ttk.Frame, row: int) -> None:
+        # Record your own "goofy laugh" to replace the stock clip the goofy
+        # preset punctuates speech with, plus a one-click revert to stock.
+        lframe = ttk.Frame(frame)
+        lframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Label(lframe, text="Goofy laugh:").pack(side="left", padx=(0, 6))
+        self.laugh_record_button = ttk.Button(
+            lframe, text="Record laugh", command=self._on_record_laugh
+        )
+        self.laugh_record_button.pack(side="left", padx=(0, 4))
+        ttk.Button(lframe, text="Stop & use", command=self._on_record_laugh_stop).pack(
+            side="left", padx=4
+        )
+        ttk.Button(lframe, text="Use stock laugh", command=self._on_reset_laugh).pack(
+            side="left", padx=4
+        )
+        # Which clip is live (custom vs stock), kept fresh by the status poll.
+        self.laugh_source_label = ttk.Label(lframe, text="")
+        self.laugh_source_label.pack(side="left", padx=(10, 0))
 
     def _build_ramp_row(self, frame: ttk.Frame, row: int) -> None:
         # Intensity ramp-in duration as hours/minutes/seconds text boxes,
@@ -668,6 +689,34 @@ class VoicePranksApp:
     def _on_record_stop(self) -> None:
         self.engine.record_stop()
 
+    def _on_record_laugh(self) -> None:
+        # Capturing the laugh needs the input stream live, but not the effect
+        # enabled -- the clip is a dry recording of you, so we don't force the
+        # voice changer on the way the take recorder does.
+        if not self.engine.running:
+            try:
+                self.engine.start()
+            except Exception as exc:
+                self.error_message = f"Could not start audio for laugh recording: {exc}"
+                return
+        self.engine.record_laugh_start()
+        self.error_message = None
+
+    def _on_record_laugh_stop(self) -> None:
+        try:
+            self.engine.record_laugh_stop()
+        except ValueError:
+            self.error_message = "Laugh recording was empty or silent -- nothing saved."
+        except Exception as exc:
+            self.error_message = f"Saving custom laugh failed: {exc}"
+
+    def _on_reset_laugh(self) -> None:
+        try:
+            self.engine.reset_laugh_to_stock()
+            self.error_message = None
+        except Exception as exc:
+            self.error_message = f"Reverting to stock laugh failed: {exc}"
+
     def _on_monitor_toggle(self) -> None:
         self.engine.set_param("monitor", self.monitor_var.get())
 
@@ -720,6 +769,17 @@ class VoicePranksApp:
                 self.monitor_var.set(bool(status.get("monitor", False)))
         finally:
             self._suppress_commands = False
+
+        # Reflect the custom-laugh state: which clip is live and whether a
+        # laugh is currently being captured.
+        laugh_recording = bool(status.get("laugh_recording"))
+        if status.get("custom_laugh"):
+            self.laugh_source_label.config(text="custom clip active")
+        else:
+            self.laugh_source_label.config(text="stock clip")
+        self.laugh_record_button.config(
+            text="Recording laugh…" if laugh_recording else "Record laugh"
+        )
 
         level = status.get("level", {})
         error_suffix = f"\nError: {self.error_message}" if self.error_message else ""

@@ -164,6 +164,23 @@ apply one instantly. Presets set the **voice character only** — they don't
 touch your input/output devices, on/off state, or the live monitor. Edit
 `PRESETS` in `presets.py` to change them or add your own.
 
+## Record your own goofy laugh
+
+The **goofy** preset punctuates your speech with a bundled "goofy laugh" clip.
+You can swap that clip for your own recording without touching any files:
+
+- **Record laugh** — starts the audio engine (if needed) and captures your
+  mic. Laugh it up, then hit **Stop & use** to install what you recorded as the
+  active laugh. It's saved to `~/.voicepranks/custom_laugh.wav`, so it sticks
+  across restarts. (A silent/empty recording is ignored — the current clip is
+  left alone.)
+- **Use stock laugh** — reverts to the bundled clip and deletes your recording.
+
+The label next to the buttons shows which clip is live (**custom clip active**
+or **stock clip**). The same flow is on the HTTP API: `POST
+/api/laugh/record/start`, `POST /api/laugh/record/stop`, `POST /api/laugh/reset`
+(the current clip is reported as `custom_laugh` in `GET /api/state`).
+
 ## Audition the effect with no audio hardware
 
 `selftest.py` reads/writes WAV files directly, so you can hear the effect

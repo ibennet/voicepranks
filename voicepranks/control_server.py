@@ -21,6 +21,9 @@ Endpoints (all JSON in/out unless noted):
     POST /api/devices               {input_device?, output_device?}
     POST /api/record/start
     POST /api/record/stop           -> {ok, take_seconds}
+    POST /api/laugh/record/start    -> {ok, status}   (record a custom goofy laugh)
+    POST /api/laugh/record/stop     -> {ok, status}   (install it; 400 if silent)
+    POST /api/laugh/reset           -> {ok, status}   (revert to the stock laugh)
     GET  /api/presets               -> {names, presets}
     POST /api/presets/apply         {"name": "minion"} -> {ok, values}
     POST /api/render                -> {ok, take_seconds}
@@ -145,6 +148,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "status": self.engine.get_status()})
             elif path == "/api/record/stop":
                 self.engine.record_stop()
+                self._send_json({"ok": True, "status": self.engine.get_status()})
+            elif path == "/api/laugh/record/start":
+                self.engine.record_laugh_start()
+                self._send_json({"ok": True, "status": self.engine.get_status()})
+            elif path == "/api/laugh/record/stop":
+                try:
+                    self.engine.record_laugh_stop()
+                except ValueError as exc:
+                    self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self._send_json({"ok": True, "status": self.engine.get_status()})
+            elif path == "/api/laugh/reset":
+                self.engine.reset_laugh_to_stock()
                 self._send_json({"ok": True, "status": self.engine.get_status()})
             elif path == "/api/render":
                 self.engine.render_current()
