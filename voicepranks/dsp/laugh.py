@@ -47,7 +47,18 @@ from .biquad import PeakingEQ
 _FORMANTS = ((650.0, 4.0, 10.0), (1100.0, 5.0, 9.0), (2600.0, 6.0, 7.0))
 
 # Bundled stock laugh clip. If present it's used instead of the synth fallback.
-_SAMPLE_PATH = Path(__file__).resolve().parent.parent / "assets" / "goofy_laugh.wav"
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+_SAMPLE_PATH = _ASSETS_DIR / "goofy_laugh.wav"
+
+# Selectable pre-recorded laughs, by name. "goofy" is the built-in stock clip
+# (`_SAMPLE_PATH`); the others are alternates the user can switch to. Switching
+# presets is a live, in-memory choice (see `select_laugh`) -- it never touches
+# the persisted recording slot, so picking a preset can't clobber a laugh the
+# user recorded.
+_PRESET_LAUGHS = {
+    "goofy": _SAMPLE_PATH,
+    "scooby": _ASSETS_DIR / "scooby_laugh.wav",
+}
 
 # User-recorded laugh clip. Lives in the shared user config dir (`settings.
 # SETTINGS_DIR`, i.e. `~/.voicepranks/`) so it survives restarts and stays
@@ -106,22 +117,31 @@ class GoofyLaugh:
         # Where a user-recorded clip is stored (overridable so tests can point
         # it at a temp file instead of the real user config dir).
         self._custom_path = _CUSTOM_PATH
-        # Active clip: a user recording if one exists, else the bundled stock
-        # clip, else None (-> synthesized fallback). `using_custom` says which.
-        self.using_custom = False
+        # Name of the active laugh (the single source of truth for which clip
+        # is live): a bundled preset name ("goofy"/"scooby"), or "custom" for a
+        # saved recording. Set by `_load_active_sample`; presets picked later
+        # update it in memory only (see `select_laugh`).
+        self.active_laugh = "goofy"
         self._sample = self._load_active_sample()
 
         self._init_state()
 
+    @property
+    def using_custom(self) -> bool:
+        """True when a non-stock clip (a recording or a selected preset) is
+        active. Derived from `active_laugh`, so there's one source of truth."""
+        return self.active_laugh != "goofy"
+
     def _load_active_sample(self):
-        """Pick the active laugh clip: a user recording if present, else the
-        bundled stock clip, else None. Sets `using_custom` accordingly."""
+        """Pick the active laugh clip: a persisted override (a recording or a
+        previously selected preset) if present, else the bundled stock clip,
+        else None. Sets `active_laugh` accordingly."""
         if self._custom_path.exists():
             custom = _load_sample(self._custom_path, self.sample_rate)
             if custom is not None and custom.size > 0:
-                self.using_custom = True
+                self.active_laugh = "custom"
                 return custom
-        self.using_custom = False
+        self.active_laugh = "goofy"
         return _load_sample(_SAMPLE_PATH, self.sample_rate)
 
     # -- configuration ---------------------------------------------------
@@ -150,8 +170,28 @@ class GoofyLaugh:
             raise ValueError("recording is empty or silent")
         self._custom_path.parent.mkdir(parents=True, exist_ok=True)
         wavio.write_wav(str(self._custom_path), self.sample_rate, data)
+        # Copy so a later mutation of the caller's array can't corrupt our clip.
         self._sample = data.copy()
-        self.using_custom = True
+        self.active_laugh = "custom"
+
+    def select_laugh(self, name: str) -> None:
+        """Switch the live laugh to a bundled pre-recorded preset by name
+        ("goofy" is the built-in stock clip). This is an in-memory switch only:
+        it never writes to or deletes the persisted recording slot, so picking a
+        preset can't destroy a laugh the user recorded. The choice lasts for the
+        session; on the next start a saved recording (if any) is restored,
+        otherwise the stock clip."""
+        if name not in _PRESET_LAUGHS:
+            raise ValueError(f"unknown laugh preset {name!r}")
+        if name == self.active_laugh:
+            return  # already live -- skip the redundant clip reload
+        sample = _load_sample(_PRESET_LAUGHS[name], self.sample_rate)
+        if (sample is None or sample.size == 0) and name != "goofy":
+            raise ValueError(f"laugh preset {name!r} could not be loaded")
+        # For "goofy" a missing stock asset is tolerated: _sample=None falls
+        # back to the synth giggle, matching reset_to_stock.
+        self._sample = sample
+        self.active_laugh = name
 
     def reset_to_stock(self) -> None:
         """Drop any user recording and revert to the bundled stock clip.
@@ -164,7 +204,7 @@ class GoofyLaugh:
         except OSError:
             pass
         self._sample = _load_sample(_SAMPLE_PATH, self.sample_rate)
-        self.using_custom = False
+        self.active_laugh = "goofy"
 
     def reset(self) -> None:
         self._init_state()
@@ -222,6 +262,11 @@ class GoofyLaugh:
         result = out.astype(np.float32)
         np.nan_to_num(result, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         return result
+
+    def laugh_clip(self) -> np.ndarray:
+        """The waveform of one laugh (custom or stock clip, else synthesized) --
+        the same audio the automatic overlay would play, for on-demand playback."""
+        return self._next_laugh()
 
     def _next_laugh(self) -> np.ndarray:
         """The waveform for one laugh: the real clip if bundled, else synth."""

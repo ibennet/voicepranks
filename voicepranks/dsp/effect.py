@@ -216,9 +216,23 @@ class MinionEffect:
         """Revert the goofy laugh to the bundled stock clip."""
         self.laugh.reset_to_stock()
 
+    def select_laugh(self, name: str) -> None:
+        """Switch to a bundled pre-recorded laugh preset (see GoofyLaugh.select_laugh)."""
+        self.laugh.select_laugh(name)
+
+    def laugh_clip(self):
+        """One laugh waveform for on-demand playback (see GoofyLaugh.laugh_clip)."""
+        return self.laugh.laugh_clip()
+
+    @property
+    def active_laugh(self) -> str:
+        """Name of the active laugh clip ('goofy', 'scooby', or 'custom')."""
+        return self.laugh.active_laugh
+
     @property
     def custom_laugh(self) -> bool:
-        """True when a user-recorded laugh clip is active (vs the stock clip)."""
+        """True when a non-stock laugh is live -- a recording or a selected
+        preset -- vs the built-in goofy stock clip."""
         return self.laugh.using_custom
 
     def reset(self) -> None:

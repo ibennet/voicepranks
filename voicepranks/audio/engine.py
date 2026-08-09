@@ -533,6 +533,7 @@ class VoiceEngine:
             "recording": self._recording,
             "laugh_recording": self._laugh_recording,
             "custom_laugh": self.effect.custom_laugh,
+            "active_laugh": self.effect.active_laugh,
             "take_seconds": self._current_take_seconds(),
             "has_live_take": self._live_take is not None and self._live_take.size > 0,
             "has_raw_take": self._raw_take is not None and self._raw_take.size > 0,
@@ -603,6 +604,11 @@ class VoiceEngine:
         """Discard any custom laugh recording and revert to the bundled clip."""
         self.effect.reset_custom_laugh()
 
+    def select_laugh(self, name: str) -> None:
+        """Set the active laugh to a bundled pre-recorded preset ('goofy',
+        'scooby', ...). Persists across restarts (see GoofyLaugh.select_laugh)."""
+        self.effect.select_laugh(name)
+
     def _current_take_seconds(self) -> float:
         with self._record_lock:
             if self._recording:
@@ -657,6 +663,12 @@ class VoiceEngine:
         # the virtual cable -- Play is for hearing the take yourself.
         buf = self._get_take(which)
         sd.play(buf, self.sample_rate, device=self.playback_device)
+
+    def play_laugh(self) -> None:
+        # Play the active laugh clip on demand, routed to the listening device
+        # (like `play`), independent of the automatic interval overlay.
+        clip = self.effect.laugh_clip()
+        sd.play(clip, self.sample_rate, device=self.playback_device)
 
     def save(self, path: str, which: str = "live") -> None:
         buf = self._get_take(which)
