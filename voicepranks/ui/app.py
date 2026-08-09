@@ -83,6 +83,14 @@ _SKIP_PARAM_NAMES = {
 
 _PRESET_NONE = "None"
 
+# Display strings for the active laugh, keyed by the engine's `active_laugh`
+# token. Built once here rather than per status-poll tick.
+_LAUGH_LABELS = {
+    "goofy": "goofy laugh active",
+    "scooby": "scooby laugh active",
+    "custom": "your recorded laugh active",
+}
+
 
 class VoicePranksApp:
     def __init__(self, root: tk.Tk) -> None:
@@ -208,22 +216,29 @@ class VoicePranksApp:
         ).pack(side="left", padx=(12, 0))
 
     def _build_custom_laugh_row(self, frame: ttk.Frame, row: int) -> None:
-        # Record your own "goofy laugh" to replace the stock clip the goofy
-        # preset punctuates speech with, plus a one-click revert to stock.
+        # Pick which laugh the goofy preset punctuates speech with: a bundled
+        # pre-recorded clip (goofy/scooby) or one you record yourself. "Play
+        # Laugh" auditions the active clip on demand.
         lframe = ttk.Frame(frame)
         lframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        ttk.Label(lframe, text="Goofy laugh:").pack(side="left", padx=(0, 6))
+        ttk.Label(lframe, text="Laugh:").pack(side="left", padx=(0, 6))
+        ttk.Button(lframe, text="Play Laugh", command=self._on_play_laugh).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Button(
+            lframe, text="Goofy laugh", command=lambda: self._on_select_laugh("goofy")
+        ).pack(side="left", padx=4)
+        ttk.Button(
+            lframe, text="Scooby laugh", command=lambda: self._on_select_laugh("scooby")
+        ).pack(side="left", padx=4)
         self.laugh_record_button = ttk.Button(
             lframe, text="Record laugh", command=self._on_record_laugh
         )
-        self.laugh_record_button.pack(side="left", padx=(0, 4))
+        self.laugh_record_button.pack(side="left", padx=(12, 4))
         ttk.Button(lframe, text="Stop & use", command=self._on_record_laugh_stop).pack(
             side="left", padx=4
         )
-        ttk.Button(lframe, text="Use stock laugh", command=self._on_reset_laugh).pack(
-            side="left", padx=4
-        )
-        # Which clip is live (custom vs stock), kept fresh by the status poll.
+        # Which clip is live, kept fresh by the status poll.
         self.laugh_source_label = ttk.Label(lframe, text="")
         self.laugh_source_label.pack(side="left", padx=(10, 0))
 
@@ -720,12 +735,22 @@ class VoicePranksApp:
         except Exception as exc:
             self.error_message = f"Saving custom laugh failed: {exc}"
 
-    def _on_reset_laugh(self) -> None:
+    def _on_select_laugh(self, name: str) -> None:
+        # Switch the active laugh to a bundled pre-recorded clip (goofy/scooby).
         try:
-            self.engine.reset_laugh_to_stock()
+            self.engine.select_laugh(name)
             self.error_message = None
         except Exception as exc:
-            self.error_message = f"Reverting to stock laugh failed: {exc}"
+            self.error_message = f"Selecting {name} laugh failed: {exc}"
+
+    def _on_play_laugh(self) -> None:
+        # Audition the active laugh clip immediately through the speakers. Works
+        # whether or not the engine is running (routes to the output device).
+        try:
+            self.engine.play_laugh()
+            self.error_message = None
+        except Exception as exc:
+            self.error_message = f"Play laugh failed: {exc}"
 
     def _on_monitor_toggle(self) -> None:
         self.engine.set_param("monitor", self.monitor_var.get())
@@ -783,10 +808,9 @@ class VoicePranksApp:
         # Reflect the custom-laugh state: which clip is live and whether a
         # laugh is currently being captured.
         laugh_recording = bool(status.get("laugh_recording"))
-        if status.get("custom_laugh"):
-            self.laugh_source_label.config(text="custom clip active")
-        else:
-            self.laugh_source_label.config(text="stock clip")
+        active_laugh = status.get("active_laugh", "goofy")
+        label = _LAUGH_LABELS.get(active_laugh, f"{active_laugh} laugh active")
+        self.laugh_source_label.config(text=label)
         self.laugh_record_button.config(
             text="Recording laugh…" if laugh_recording else "Record laugh"
         )
