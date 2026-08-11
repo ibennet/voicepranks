@@ -33,11 +33,14 @@ binaries = collect_dynamic_libs("_sounddevice_data")
 # `dest` keeps the package-relative layout so the code can locate the file via
 # `__file__` inside the frozen bundle (same as when running from source).
 #   - webui/index.html: the control-server status page (served at "/").
-#   - assets/goofy_laugh.wav: the real Goofy laugh; without it the "goofy"
-#     preset falls back to the synthesized laugh in the bundle.
+#   - assets/*.wav: the stock laugh clips the picker switches between; without
+#     them the goofy/scooby laughs fall back to the synthesized giggle (or fail
+#     to load) in the bundle. Every clip in `_PRESET_LAUGHS` (dsp/laugh.py) must
+#     be listed here or its picker button can't switch to it in a packaged build.
 datas = [
     ("voicepranks/webui/index.html", "voicepranks/webui"),
     ("voicepranks/assets/goofy_laugh.wav", "voicepranks/assets"),
+    ("voicepranks/assets/scooby_laugh.wav", "voicepranks/assets"),
 ]
 
 a = Analysis(

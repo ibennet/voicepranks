@@ -50,8 +50,11 @@ from . import params as params_mod
 from . import presets as presets_mod
 from . import settings as settings_mod
 from .audio.devices import list_input_devices, list_output_devices
+from .resources import resource_path
 
-_WEBUI_INDEX = Path(__file__).parent / "webui" / "index.html"
+# Resolved via `resource_path` so the status page is found inside a PyInstaller
+# build too (a `__file__`-relative path misses it in the packaged macOS .app).
+_WEBUI_INDEX = resource_path("webui", "index.html")
 
 # The API can start the mic and read back recordings, so it is authenticated
 # even though it only listens on loopback: any web page you visit can reach

@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 
 from ..audio import wavio
+from ..resources import resource_path
 from ..settings import SETTINGS_DIR
 from .biquad import PeakingEQ
 
@@ -46,8 +47,10 @@ from .biquad import PeakingEQ
 # source into a laugh vowel (roughly an "uh/ah"). Used by the synth fallback.
 _FORMANTS = ((650.0, 4.0, 10.0), (1100.0, 5.0, 9.0), (2600.0, 6.0, 7.0))
 
-# Bundled stock laugh clip. If present it's used instead of the synth fallback.
-_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+# Bundled stock laugh clips. Resolved via `resource_path` so they're found both
+# from source and inside a PyInstaller build (a `__file__`-relative path misses
+# them in the packaged macOS .app -- see resources.py).
+_ASSETS_DIR = resource_path("assets")
 _SAMPLE_PATH = _ASSETS_DIR / "goofy_laugh.wav"
 
 # Selectable pre-recorded laughs, by name. "goofy" is the built-in stock clip
