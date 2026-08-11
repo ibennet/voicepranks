@@ -75,6 +75,7 @@ _SKIP_PARAM_NAMES = {
     "enabled",
     "monitor",
     "output_gain",  # dedicated always-visible Output volume row instead of a slider
+    "playback_gain",  # dedicated always-visible Playback volume row instead of a slider
     "ramp.duration_s",  # dedicated H/M/S row instead of a slider
     "io.input_device",
     "io.output_device",
@@ -141,7 +142,7 @@ class VoicePranksApp:
         frame.grid(row=0, column=0, sticky="nsew")
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
-        frame.rowconfigure(5, weight=1)
+        frame.rowconfigure(6, weight=1)
         frame.columnconfigure(0, weight=1)
 
         # -- top bar: Turn On | Settings… | Preset dropdown ------------------
@@ -162,15 +163,16 @@ class VoicePranksApp:
         self._build_recorder_row(frame, row=1)
         self._build_ramp_row(frame, row=2)
         self._build_output_volume_row(frame, row=3)
-        self._build_custom_laugh_row(frame, row=4)
+        self._build_playback_volume_row(frame, row=4)
+        self._build_custom_laugh_row(frame, row=5)
 
         ttk.Label(frame, text="Parameters (click a section to expand)").grid(
-            row=5, column=0, sticky="w", pady=(6, 0)
+            row=6, column=0, sticky="w", pady=(6, 0)
         )
 
         # -- scrollable area of collapsible param sections -------------------
         scroll_container = ttk.Frame(frame)
-        scroll_container.grid(row=6, column=0, sticky="nsew", pady=(2, 8))
+        scroll_container.grid(row=7, column=0, sticky="nsew", pady=(2, 8))
         scroll_container.rowconfigure(0, weight=1)
         scroll_container.columnconfigure(0, weight=1)
 
@@ -190,7 +192,7 @@ class VoicePranksApp:
         self._build_param_controls(self._param_grid)
 
         self.status_label = ttk.Label(frame, text="", justify="left")
-        self.status_label.grid(row=7, column=0, sticky="w", pady=(4, 0))
+        self.status_label.grid(row=8, column=0, sticky="w", pady=(4, 0))
 
     def _build_recorder_row(self, frame: ttk.Frame, row: int) -> None:
         rec_frame = ttk.Frame(frame)
@@ -261,41 +263,51 @@ class VoicePranksApp:
         self._populate_ramp_fields()
 
     def _build_output_volume_row(self, frame: ttk.Frame, row: int) -> None:
-        # Post-effect output level, always visible (not buried in the collapsed
-        # param grid) so a too-quiet preset can be boosted at a glance. Built
-        # from the shared `_build_one_control` slider so the var, drag-guard,
-        # and status-poll sync wiring come for free (same as the generated
-        # grid) -- only the always-visible placement, the percent readout, and
-        # the Reset button are bespoke here. It's the same `output_gain` param
-        # as the API, skipped from the grid (see `_SKIP_PARAM_NAMES`).
+        # Post-effect outgoing level (what other apps hear).
+        self._build_gain_row(frame, row, "output_gain", self.engine.output_gain)
+
+    def _build_playback_volume_row(self, frame: ttk.Frame, row: int) -> None:
+        # Listening-side level: Play, Play Laugh, and the automatic-laugh
+        # headphone echo. Sits next to Output volume so the two read as a pair.
+        self._build_gain_row(frame, row, "playback_gain", self.engine.playback_gain)
+
+    def _build_gain_row(
+        self, frame: ttk.Frame, row: int, param_name: str, current_value: float
+    ) -> None:
+        # Shared builder for the always-visible linear-gain rows (Output volume,
+        # Playback volume), pulled out of the collapsed param grid so they're
+        # adjustable at a glance. Built from the shared `_build_one_control`
+        # slider so the var, drag-guard, and status-poll sync wiring come for
+        # free (same as the generated grid) -- only the always-visible placement,
+        # the percent readout, and the Reset button are bespoke. These are the
+        # same params as the API, skipped from the grid (see `_SKIP_PARAM_NAMES`).
+        # Seed from the live engine value (not spec.default) so an out-of-band
+        # change made before this window built -- e.g. via the control API, which
+        # starts before the widgets -- shows correctly rather than 100% until the
+        # first status poll.
         vframe = ttk.Frame(frame)
         vframe.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         vframe.columnconfigure(1, weight=1)  # let the slider stretch
-        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        spec = PARAM_SPECS_BY_NAME[param_name]
         self._build_one_control(vframe, spec, row=0)
-        # Show the level as a percentage instead of the generic "%.3g", and
-        # seed from the live engine value (not spec.default) so an out-of-band
-        # change made before this window built -- e.g. via the control API,
-        # which starts before the widgets -- shows correctly rather than 100%
-        # until the first status poll.
         widget = self._param_widgets[spec.name]
         widget["readout_fmt"] = self._format_gain
-        widget["var"].set(float(self.engine.output_gain))
-        widget["readout"].config(text=self._format_gain(self.engine.output_gain))
-        ttk.Button(vframe, text="Reset", command=self._on_output_gain_reset).grid(
-            row=0, column=3, padx=(6, 0)
-        )
+        widget["var"].set(float(current_value))
+        widget["readout"].config(text=self._format_gain(current_value))
+        ttk.Button(
+            vframe, text="Reset", command=lambda n=param_name: self._on_gain_reset(n)
+        ).grid(row=0, column=3, padx=(6, 0))
 
     @staticmethod
     def _format_gain(gain) -> str:
         return f"{int(round(float(gain) * 100))}%"
 
-    def _on_output_gain_reset(self) -> None:
+    def _on_gain_reset(self, param_name: str) -> None:
         # `var.set` moves the slider knob; the explicit `_on_param_slider` call
         # then applies the value to the engine and refreshes the readout
         # synchronously (the Scale's own command fires via the Tk event loop,
         # so we can't rely on it having run by the time this returns).
-        spec = PARAM_SPECS_BY_NAME["output_gain"]
+        spec = PARAM_SPECS_BY_NAME[param_name]
         self._param_widgets[spec.name]["var"].set(1.0)
         self._on_param_slider(spec, 1.0)
 
@@ -773,6 +785,14 @@ class VoicePranksApp:
     # -- status polling ------------------------------------------------
 
     def _refresh_status(self) -> None:
+        # Echo a just-fired automatic laugh to the headphones (monitor-off case).
+        # Runs on this main-thread poll -- `sd.play` must not run on the audio
+        # thread -- and is best-effort so a playback hiccup never kills the loop.
+        try:
+            self.engine.poll_pending_laugh_echo()
+        except Exception as exc:
+            self.error_message = f"Laugh echo failed: {exc}"
+
         status = self.engine.get_status()
         snapshot = self.engine.snapshot()
 
