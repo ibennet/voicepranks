@@ -113,6 +113,12 @@ class VoiceEngine:
         # preset be sent hot to other apps without re-tuning its DSP or changing
         # what you monitor. 1.0 = unity, >1.0 boosts, 0.0 = silence.
         self.output_gain = 1.0
+        # Playback (listening) level: a linear multiplier applied to everything
+        # sent to your headphones/speakers via `sd.play` -- the Play button, the
+        # Play Laugh button, and the automatic-laugh headphone echo. Independent
+        # of `output_gain` (which is the outgoing-cable level), so you can set
+        # how loud playback is in your own ears without changing the prank.
+        self.playback_gain = 1.0
         self._manual_intensity: Optional[float] = None
         # Last intensity pushed to the effect from the callback, so a constant
         # intensity (e.g. after the ramp settles) doesn't re-derive every
@@ -173,6 +179,22 @@ class VoiceEngine:
         # an in-progress take, and vice versa.
         self._laugh_recording = False
         self._laugh_chunks: List[np.ndarray] = []
+
+        # -- on-demand laugh overlay (Play Laugh -> outgoing cable) ---------
+        # The Play Laugh button mixes the active clip onto the outgoing signal
+        # so other apps hear it too (the automatic laugh already mixes itself
+        # in via the DSP). Set from the UI thread, consumed on the audio thread
+        # in `_input_callback`, hence its own lock. `None` = nothing playing.
+        self._laugh_overlay: Optional[np.ndarray] = None
+        self._laugh_overlay_pos = 0
+        self._laugh_overlay_lock = threading.Lock()
+
+        # -- automatic-laugh headphone echo --------------------------------
+        # The automatic laugh reaches the cable (and the monitor, if on), but
+        # not your headphones when the monitor is off. The main-thread status
+        # poll (`poll_pending_laugh_echo`) watches the laugh's monotonic fire
+        # counter against this last-seen value to detect a fire and echo it.
+        self._last_laugh_fire_count = self.effect.laugh.fire_count
 
     # -- param registry (shared by Tkinter UI + HTTP control server) -----
 
@@ -282,6 +304,10 @@ class VoiceEngine:
             # Pitch/Minionese internal windows are sized in samples off the
             # sample rate, so a rate change needs a fresh DSP chain.
             self.effect = MinionEffect(self.sample_rate, channels=1)
+            # The fresh effect's laugh starts its fire counter at 0; resync our
+            # last-seen value so the counter reset doesn't read as a "new laugh"
+            # and fire a spurious headphone echo on the next poll.
+            self._last_laugh_fire_count = self.effect.laugh.fire_count
 
         # Devices/blocksize/ring_ms don't change effect identity, but
         # rebuilding the registry unconditionally is cheap and keeps every
@@ -352,6 +378,12 @@ class VoiceEngine:
             self.output_stream.close()
             self.output_stream = None
         self.running = False
+        # Drop any in-flight Play-Laugh overlay so a clip queued just before a
+        # stop (e.g. a device change) can't resurface and burst onto the cable
+        # at the next start().
+        with self._laugh_overlay_lock:
+            self._laugh_overlay = None
+            self._laugh_overlay_pos = 0
 
     # -- live monitor ----------------------------------------------------
 
@@ -444,6 +476,12 @@ class VoiceEngine:
         """Set the post-effect output level (linear multiplier). Clamped at 0
         (no negatives); no upper bound so a quiet preset can be pushed hot."""
         self.output_gain = max(0.0, float(gain))
+
+    def set_playback_gain(self, gain: float) -> None:
+        """Set the listening-side level (linear multiplier) applied to Play,
+        Play Laugh, and the automatic-laugh headphone echo. Clamped at 0 (no
+        negatives); no upper bound, matching `set_output_gain`."""
+        self.playback_gain = max(0.0, float(gain))
 
     def restart_ramp(self, duration_s: Optional[float] = None) -> None:
         """Restart the intensity ramp from 0 with the current (or given)
@@ -658,17 +696,82 @@ class VoiceEngine:
             raise RuntimeError(f"no {which} take available")
         return buf
 
+    def _play_to_headphones(self, clip: np.ndarray) -> None:
+        """Play `clip` to the listening device (speakers/headphones) at the
+        current playback level. Shared by Play, Play Laugh, and the automatic-
+        laugh echo so the Playback-volume knob governs all three."""
+        buf = clip
+        if self.playback_gain != 1.0:
+            buf = np.asarray(clip, dtype=np.float32) * np.float32(self.playback_gain)
+        sd.play(buf, self.sample_rate, device=self.playback_device)
+
+    def _queue_output_overlay(self, clip: np.ndarray) -> None:
+        """Queue `clip` to be mixed onto the outgoing (virtual-cable) signal by
+        the audio thread. A fresh call restarts any overlay still playing."""
+        overlay = np.asarray(clip, dtype=np.float32).copy()
+        with self._laugh_overlay_lock:
+            self._laugh_overlay = overlay
+            self._laugh_overlay_pos = 0
+
+    def _take_overlay_chunk(self, n: int) -> Optional[np.ndarray]:
+        """Pop the next `n` samples of the queued laugh overlay (zero-padded if
+        it ends mid-block), or None when nothing is queued or `n <= 0`. Clears
+        the overlay once exhausted. Called on the audio thread."""
+        # Lock-free resting fast-path: reading the object reference is atomic
+        # under the GIL, and the overlay is queued/cleared only rarely (a button
+        # press), so keep the mutex off the hot path when nothing is playing. A
+        # freshly queued overlay simply starts one block later -- harmless.
+        if n <= 0 or self._laugh_overlay is None:
+            return None
+        with self._laugh_overlay_lock:
+            overlay = self._laugh_overlay
+            if overlay is None:
+                return None
+            pos = self._laugh_overlay_pos
+            take = min(n, overlay.shape[0] - pos)
+            # `np.empty` + tail-zero avoids memset-ing the whole block on the
+            # common full-cover blocks (only the final partial block needs it).
+            chunk = np.empty(n, dtype=np.float32)
+            chunk[:take] = overlay[pos:pos + take]
+            if take < n:
+                chunk[take:] = 0.0
+            pos += take
+            if pos >= overlay.shape[0]:
+                self._laugh_overlay = None
+                self._laugh_overlay_pos = 0
+            else:
+                self._laugh_overlay_pos = pos
+            return chunk
+
     def play(self, which: str = "live") -> None:
         # Route playback to the listening device (speakers/headphones), NOT
         # the virtual cable -- Play is for hearing the take yourself.
         buf = self._get_take(which)
-        sd.play(buf, self.sample_rate, device=self.playback_device)
+        self._play_to_headphones(buf)
 
     def play_laugh(self) -> None:
-        # Play the active laugh clip on demand, routed to the listening device
-        # (like `play`), independent of the automatic interval overlay.
+        # Play the active laugh clip on demand to BOTH outputs: mixed onto the
+        # outgoing cable (so other apps/the prank target hear it) when running,
+        # and always to your listening device. Stopped -> headphones-only
+        # audition, since there's no live output stream to mix into.
         clip = self.effect.laugh_clip()
-        sd.play(clip, self.sample_rate, device=self.playback_device)
+        if self.running:
+            self._queue_output_overlay(clip)
+        self._play_to_headphones(clip)
+
+    def poll_pending_laugh_echo(self) -> None:
+        """Echo a just-fired automatic laugh to your headphones. Called from the
+        main-thread status poll (never the audio thread -- `sd.play` mustn't run
+        there). Detects a fire by watching the laugh's monotonic `fire_count`;
+        multiple laughs fired between polls collapse into a single echo. Skips
+        the echo when the live monitor is on, since the monitor already carries
+        the laugh to your listening device -- echoing too would double it."""
+        fc = self.effect.laugh.fire_count
+        if fc == self._last_laugh_fire_count:
+            return
+        self._last_laugh_fire_count = fc
+        if not self.monitor_enabled:
+            self._play_to_headphones(self.effect.laugh_clip())
 
     def save(self, path: str, which: str = "live") -> None:
         buf = self._get_take(which)
@@ -744,6 +847,17 @@ class VoiceEngine:
                 out_mic = np.zeros_like(processed)
             elif self.output_gain != 1.0 and processed.size:
                 out_mic = processed * np.float32(self.output_gain)
+
+            # Mix any on-demand laugh overlay (Play Laugh) onto the OUTGOING
+            # signal only -- deliberately not `processed`/the monitor feed, so
+            # your headphone side stays a single source (the sd.play echo).
+            # `out_mic = out_mic + ...` rebinds to a fresh array, so `processed`
+            # (fed to the monitor below) is never mutated. Scaled by output_gain
+            # so the one outgoing-level knob governs the injected laugh too.
+            overlay_chunk = self._take_overlay_chunk(out_mic.shape[0])
+            if overlay_chunk is not None:
+                out_mic = out_mic + overlay_chunk * np.float32(self.output_gain)
+                np.clip(out_mic, -1.0, 1.0, out=out_mic)
 
             # Meter the output-mic signal (post-gain) so the "out" level shows
             # what other apps actually receive, revealing clipping when the

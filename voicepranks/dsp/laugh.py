@@ -124,6 +124,12 @@ class GoofyLaugh:
         self.active_laugh = "goofy"
         self._sample = self._load_active_sample()
 
+        # Monotonic count of laughs actually started, so an outside observer
+        # (the engine) can detect a fire by watching it change -- without
+        # polling the playhead. Deliberately NOT reset by `_init_state`/`reset`:
+        # a reset that rewound it to 0 would read as a spurious "new laugh" to a
+        # watcher holding a higher last-seen value.
+        self.fire_count = 0
         self._init_state()
 
     @property
@@ -303,6 +309,10 @@ class GoofyLaugh:
         if fade_out > 0:
             fade[-fade_out:] = np.linspace(1.0, 0.0, fade_out)
         self._fade = fade
+
+        # Signal the fire only once the laugh is real (non-empty clip), so a
+        # watcher's headphone echo lines up with actual audio going out.
+        self.fire_count += 1
 
     def _synth_laugh(self) -> np.ndarray:
         """Synthesize one giggle: glottal source + breath + formants, "a-hyuck"."""
